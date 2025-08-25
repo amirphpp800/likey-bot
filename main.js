@@ -127,10 +127,14 @@ async function isMemberOfRequired(env, userId) {
 }
 
 function mainMenu(forceChannel) {
+  // ردیف ۱: فقط ساخت لایک (تکی)
+  // ردیف ۲: مدیریت کانال و آمار در یک ردیف
   const rows = [
     [{ text: '➕ ساخت لایک', callback_data: 'act:create_like' }],
-    [{ text: '📊 آمار', callback_data: 'act:stats' }],
-    [{ text: '📣 ثبت/تغییر کانال من', callback_data: 'act:my_channel' }],
+    [
+      { text: '📣 مدیریت کانال', callback_data: 'act:my_channel' },
+      { text: '📊 آمار', callback_data: 'act:stats' },
+    ],
   ];
   // دکمه تنظیم کانال فقط برای ادمین در زمان نمایش، کنترل می‌شود
   return { inline_keyboard: rows };
@@ -144,9 +148,10 @@ function adminExtraMenu(forceChannel) {
   return { inline_keyboard: rows };
 }
 
+// ===== Keyboards & UI =====
 function bannerKeyboard(like, memberRequired) {
   const rows = [
-    [{ text: `👍 لایک (${like.count})`, callback_data: `like:${like.id}` }],
+    [{ text: `❤️ لایک (${like.count})`, callback_data: `like:${like.id}` }],
   ];
   if (memberRequired && like.requiredChannel) {
     const url = `https://t.me/${like.requiredChannel.replace('@', '')}`;
@@ -203,6 +208,7 @@ async function sendHome(chatId, userId, env) {
   await tgApi(env).sendMessage({ chat_id: chatId, text, reply_markup: { inline_keyboard: base }, parse_mode: 'HTML' });
 }
 
+// ===== Handlers: Start, Text, Callback =====
 async function handleStart(update, env) {
   const msg = update.message;
   const userId = msg.from.id;
@@ -258,7 +264,7 @@ async function handleTextMessage(update, env) {
       channelInfo = { id: ch.id, username: ch.username ? `@${ch.username}` : undefined, title: ch.title };
     } else {
       // ورودی متنی: @username یا آیدی -100...
-      if (channelIdOrUsername && !/^@|^-?\d+$/.test(channelIdOrUsername)) {
+      if (channelIdOrUsername && !(channelIdOrUsername.startsWith('@') || /^-?\d+$/.test(channelIdOrUsername))) {
         channelIdOrUsername = `@${channelIdOrUsername}`;
       }
       channelInfo = { id: channelIdOrUsername, username: channelIdOrUsername.startsWith('@') ? channelIdOrUsername : undefined };
@@ -290,6 +296,12 @@ async function handleTextMessage(update, env) {
     const bannerText = `بنر لایک ساخته شد!\n\nعنوان: ${like.title}\nشناسه: <code>${like.id}</code>`;
     const reply_markup = { inline_keyboard: [[{ text: '📤 اشتراک بنر', callback_data: `share:${like.id}` }]] };
     await tgApi(env).sendMessage({ chat_id: chatId, text: bannerText, reply_markup, parse_mode: 'HTML' });
+    // یادآوری ثبت کانال برای جلوگیری از مشکل در ارسال مستقیم
+    const remindText = 'برای اینکه هنگام اشتراک بنر به مشکل برنخورید، کانال‌تان را ثبت کنید. اگر ربات ادمین نباشد، مجبور به ارسال دستی خواهید شد.';
+    const remindMarkup = { inline_keyboard: [[{ text: '⚙️ مدیریت کانال', callback_data: 'act:my_channel' }]] };
+    await tgApi(env).sendMessage({ chat_id: chatId, text: remindText, reply_markup: remindMarkup });
+    // نمایش خودکار منوی اصلی در یک پیام جدید
+    await sendHome(chatId, userId, env);
     await clearUserState(env, userId);
     return;
   }
@@ -342,6 +354,23 @@ async function handleCallback(update, env) {
     return tgApi(env).sendMessage({ chat_id: chatId, text: 'عنوان لایک را ارسال کن (حداکثر ۱۰۰ کاراکتر):' });
   }
 
+  // ثبت/تغییر کانال کاربر برای ارسال مستقیم
+  if (data === 'act:my_channel') {
+    await tgApi(env).answerCallbackQuery({ callback_query_id: cb.id });
+    const current = await getUserChannel(env, userId);
+    const helper = 'برای ارسال مستقیم پست در کانال‌تان:\n1) ربات را در کانالتان ادمین کنید.\n2) یوزرنیم کانال (مثل @YourChannel) را بفرستید یا یک پیام از کانال برای من فوروارد کنید.';
+    const extra = current ? `\nکانال ثبت‌شده فعلی: ${current.username || current.title || current.id}` : '';
+    const reply_markup = current ? { inline_keyboard: [[{ text: '❌ حذف کانال ثبت‌شده', callback_data: 'my_channel_clear' }]] } : undefined;
+    await setUserState(env, userId, 'await_user_channel_username');
+    return tgApi(env).sendMessage({ chat_id: chatId, text: helper + extra, reply_markup });
+  }
+
+  if (data === 'my_channel_clear') {
+    await tgApi(env).answerCallbackQuery({ callback_query_id: cb.id });
+    await clearUserChannel(env, userId);
+    return tgApi(env).sendMessage({ chat_id: chatId, text: 'کانال ثبت‌شده شما حذف شد.' });
+  }
+
   if (data.startsWith('share:')) {
     const likeId = data.split(':')[1];
     const like = await getLike(env, likeId);
@@ -355,14 +384,45 @@ async function handleCallback(update, env) {
     const needMembership = !!like.requiredChannel;
     const reply_markup = { inline_keyboard: [
       [{ text: '📣 ارسال به کانال من', callback_data: `share_send:${like.id}` }],
-      [{ text: '⚙️ ثبت/تغییر کانال من', callback_data: 'act:my_channel' }],
+      [{ text: '⚙️ مدیریت کانال', callback_data: 'act:my_channel' }],
       [{ text: '🧰 ارسال دستی (راهنما)', callback_data: `share_manual:${like.id}` }],
-      [{ text: `👍 پیش‌نمایش لایک (${like.count})`, callback_data: 'noop' }]
+      [{ text: `❤️ پیش‌نمایش لایک (${like.count})`, callback_data: 'noop' }]
     ]};
     // پیش‌نمایش را هم برای فوروارد دستی کاربر می‌فرستیم (ممکن است کیبورد حفظ نشود)
     await tgApi(env).sendMessage({ chat_id: chatId, text: banner, reply_markup: bannerKeyboard(like, needMembership) });
     // پنل اشتراک
     return tgApi(env).sendMessage({ chat_id: chatId, text: 'گزینه موردنظر برای اشتراک در کانال را انتخاب کن:', reply_markup });
+  }
+
+  // ارسال مستقیم بنر به کانال ثبت‌شده کاربر
+  if (data.startsWith('share_send:')) {
+    const likeId = data.split(':')[1];
+    const like = await getLike(env, likeId);
+    await tgApi(env).answerCallbackQuery({ callback_query_id: cb.id });
+    if (!like) return tgApi(env).sendMessage({ chat_id: chatId, text: 'این لایک دیگر وجود ندارد.' });
+    const userCh = await getUserChannel(env, userId);
+    if (!userCh) {
+      return tgApi(env).sendMessage({ chat_id: chatId, text: 'ابتدا از «📣 مدیریت کانال» کانال خود را ثبت کنید.' });
+    }
+    const banner = `⭐️ لایک جدید!\n\n${like.title}\n\nبرای حمایت، روی دکمه لایک بزنید.`;
+    try {
+      await tgApi(env).sendMessage({ chat_id: userCh.id, text: banner, reply_markup: bannerKeyboard(like, !!like.requiredChannel) });
+      return tgApi(env).sendMessage({ chat_id: chatId, text: '✅ پست با دکمه لایک در کانال شما ارسال شد.' });
+    } catch (e) {
+      return tgApi(env).sendMessage({ chat_id: chatId, text: '❗️ارسال مستقیم به کانال ناموفق بود. ربات را ادمین کنید یا از «🧰 ارسال دستی (راهنما)» استفاده کنید.' });
+    }
+  }
+
+  // راهنمای ارسال دستی
+  if (data.startsWith('share_manual:')) {
+    const likeId = data.split(':')[1];
+    const like = await getLike(env, likeId);
+    await tgApi(env).answerCallbackQuery({ callback_query_id: cb.id });
+    if (!like) return tgApi(env).sendMessage({ chat_id: chatId, text: 'این لایک دیگر وجود ندارد.' });
+    const banner = `⭐️ لایک جدید!\n\n${like.title}\n\nبرای حمایت، روی دکمه لایک بزنید.`;
+    await tgApi(env).sendMessage({ chat_id: chatId, text: 'راهنمای ارسال دستی:\n1) پیام زیر را کپی/فوروارد کنید در کانال\n2) دکمه لایک به‌صورت پیش‌نمایش جداگانه ارسال می‌شود.', disable_web_page_preview: true });
+    await tgApi(env).sendMessage({ chat_id: chatId, text: banner, reply_markup: bannerKeyboard(like, !!like.requiredChannel) });
+    return;
   }
 
   if (data.startsWith('like:')) {
