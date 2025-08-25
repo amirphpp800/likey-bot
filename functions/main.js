@@ -1,5 +1,5 @@
 // Telegram Like Bot - Cloudflare Workers Version
-import { Bot, webhookCallback } from "grammy";
+import { Bot, webhookCallback } from "https://esm.sh/grammy";
 
 // Bot configuration
 const bot = new Bot(process.env.BOT_TOKEN || "");
