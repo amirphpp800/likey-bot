@@ -3,7 +3,7 @@
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
 // Bot version (bump this on each update)
-const BOT_VERSION = '1.2';
+const BOT_VERSION = '1.3';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
@@ -25,6 +25,25 @@ const editMessage = async (token, chatId, messageId, text, keyboard = null) => {
   const params = { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' };
   if (keyboard) params.reply_markup = keyboard;
   return telegramAPI(token, 'editMessageText', params);
+};
+
+// Resolve bot username automatically (cache in KV)
+const resolveBotUsername = async (token, kv, fallbackEnvUsername) => {
+  if (fallbackEnvUsername && fallbackEnvUsername !== 'your_bot') return fallbackEnvUsername;
+  const cached = await kv.get('bot_username');
+  if (cached) return cached;
+  try {
+    const resp = await telegramAPI(token, 'getMe');
+    const data = await resp.json();
+    const uname = data?.result?.username || '';
+    if (uname) {
+      await kv.put('bot_username', uname);
+      return uname;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return fallbackEnvUsername || 'your_bot';
 };
 
 const checkChannelMembership = async (token, userId, channelUsername) => {
@@ -118,13 +137,14 @@ export const handleUpdate = async (update, env) => {
   const { BOT_TOKEN, BOT_KV, BOT_USERNAME } = env;
 
   try {
+    const resolvedUsername = await resolveBotUsername(BOT_TOKEN, BOT_KV, BOT_USERNAME);
     if (update.message) {
-      await handleMessage(update.message, BOT_TOKEN, BOT_KV, BOT_USERNAME);
+      await handleMessage(update.message, BOT_TOKEN, BOT_KV, resolvedUsername);
     } else if (update.callback_query) {
-      await handleCallbackQuery(update.callback_query, BOT_TOKEN, BOT_KV, BOT_USERNAME);
+      await handleCallbackQuery(update.callback_query, BOT_TOKEN, BOT_KV, resolvedUsername);
     }
-  } catch (error) {
-    console.error('Error handling update:', error);
+  } catch (err) {
+    console.error('Error handling update:', err);
   }
 };
 
@@ -133,21 +153,24 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
   const chatId = message.chat.id;
   const userId = message.from.id;
   const text = message.text || '';
+  const userState = await kv.get(`state:${userId}`);
 
-  // Global required channel enforcement for bot usage
-  const isMember = await checkChannelMembership(token, userId, REQUIRED_CHANNEL);
-  if (!isMember) {
-    return sendMessage(
-      token,
-      chatId,
-      `سلام! 💙\nبرای استفاده از بات، اول عضو کانال ${REQUIRED_CHANNEL} شو و برگرد.`,
-      {
-        inline_keyboard: [
-          [{ text: '📢 عضویت در کانال', url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
-          [{ text: '🔄 عضوم شدم، بررسی کن', callback_data: 'check_membership' }]
-        ]
-      }
-    );
+  // Global required channel enforcement for bot usage (skip while in input states)
+  if (!userState) {
+    const isMember = await checkChannelMembership(token, userId, REQUIRED_CHANNEL);
+    if (!isMember) {
+      return sendMessage(
+        token,
+        chatId,
+        `سلام! 💙\nبرای استفاده از بات، اول عضو کانال ${REQUIRED_CHANNEL} شو و برگرد.`,
+        {
+          inline_keyboard: [
+            [{ text: '📢 عضویت در کانال', url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
+            [{ text: '🔄 عضوم شدم، بررسی کن', callback_data: 'check_membership' }]
+          ]
+        }
+      );
+    }
   }
 
   // Deep link payload: /start <likeId>
@@ -204,63 +227,9 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
     return;
   }
 
-  // Creator helper: return share link
-  if (data.startsWith('get_share_link:')) {
-    const likeId = data.split(':')[1];
-    const likeRaw = await kv.get(`like:${likeId}`);
-    if (!likeRaw) {
-      await telegramAPI(token, 'answerCallbackQuery', {
-        callback_query_id: query.id,
-        text: 'این مورد پیدا نشد 🥲',
-        show_alert: true
-      });
-      return;
-    }
-    const like = JSON.parse(likeRaw);
-    if (like.creator !== userId) {
-      await telegramAPI(token, 'answerCallbackQuery', {
-        callback_query_id: query.id,
-        text: '⛔️ فقط سازنده می‌تونه لینک رو بگیره.',
-        show_alert: true
-      });
-      return;
-    }
-
-    const payload = like.token || like.id;
-    if (!botUsername || botUsername === 'your_bot') {
-      await sendMessage(
-        token,
-        chatId,
-        `🔗 لینک دیپ‌لینک شما آماده‌ست:\n\n` +
-          `t.me/<BOT_USERNAME>?start=${payload}\n\n` +
-          `برای فعال شدن لینک، مقدار BOT_USERNAME رو در تنظیمات بات ست کن.`
-      );
-      return;
-    }
-
-    const deepLink = buildDeepLink(botUsername, payload);
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=${encodeURIComponent(`بیاین باهم لایک کنیم: ${like.name}`)}`;
-
-    await sendMessage(
-      token,
-      chatId,
-      `🔗 لینک اشتراک آماده‌ست:\n${deepLink}`,
-      {
-        inline_keyboard: [
-          [
-            { text: '✅ بازکردن لینک', url: deepLink }
-          ],
-          [
-            { text: '🔗 ارسال برای دوستان', url: shareUrl }
-          ]
-        ]
-      }
-    );
-    return;
-  }
+  // (Moved) Creator helper: get_share_link handled in handleCallbackQuery()
 
   // State handling
-  const userState = await kv.get(`state:${userId}`);
 
   // User typed like name
   if (userState === 'waiting_like_name') {
