@@ -1,10 +1,9 @@
-// main.js - Telegram Like Bot for Cloudflare Pages (Without Hono)
+// main.js - Telegram Like Bot for Cloudflare Pages (ESM)
 
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
-const ADMIN_IDS = []; // Add admin user IDs here
 
-// Utility functions
+// -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
   const url = `https://api.telegram.org/bot${token}/${method}`;
   return fetch(url, {
@@ -12,6 +11,18 @@ const telegramAPI = (token, method, params = {}) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params)
   });
+};
+
+const sendMessage = async (token, chatId, text, keyboard = null) => {
+  const params = { chat_id: chatId, text, parse_mode: 'HTML' };
+  if (keyboard) params.reply_markup = keyboard;
+  return telegramAPI(token, 'sendMessage', params);
+};
+
+const editMessage = async (token, chatId, messageId, text, keyboard = null) => {
+  const params = { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' };
+  if (keyboard) params.reply_markup = keyboard;
+  return telegramAPI(token, 'editMessageText', params);
 };
 
 const checkChannelMembership = async (token, userId, channelUsername) => {
@@ -27,19 +38,7 @@ const checkChannelMembership = async (token, userId, channelUsername) => {
   }
 };
 
-const sendMessage = async (token, chatId, text, keyboard = null) => {
-  const params = { chat_id: chatId, text, parse_mode: 'HTML' };
-  if (keyboard) params.reply_markup = keyboard;
-  return telegramAPI(token, 'sendMessage', params);
-};
-
-const editMessage = async (token, chatId, messageId, text, keyboard = null) => {
-  const params = { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' };
-  if (keyboard) params.reply_markup = keyboard;
-  return telegramAPI(token, 'editMessageText', params);
-};
-
-// Keyboard generators
+// -------------------- Keyboards --------------------
 const mainMenuKeyboard = () => ({
   inline_keyboard: [
     [{ text: '🔧 تنظیمات', callback_data: 'settings' }],
@@ -55,29 +54,39 @@ const settingsKeyboard = () => ({
   ]
 });
 
-// Build deep-link to open bot with a specific like payload
+// Deep link to open bot with a specific like payload
 const buildDeepLink = (botUsername, likeId) => `https://t.me/${botUsername}?start=${likeId}`;
 
-// Keyboard for a like object with live count and share button
-// like: { id, name, likes, creator }
-const createLikeKeyboard = (like, botUsername, hasChannel = false) => {
+/*
+ createLikeKeyboard:
+ - Like button with live count
+ - Optional "Join Channel" if creator has a channel
+ - Share button to forward a deep link
+*/
+const createLikeKeyboard = (like, botUsername, creatorChannel = '') => {
   const buttons = [];
   const likeBtn = { text: `👍 لایک (${like.likes || 0})`, callback_data: like.id };
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, like.id))}&text=${encodeURIComponent(`برای حمایت، این مورد را لایک کنید: ${like.name}`)}`;
   const shareBtn = { text: '🔗 اشتراک‌گذاری', url: shareUrl };
 
-  if (hasChannel) {
-    buttons.push([likeBtn, shareBtn]);
-  } else {
-    buttons.push([likeBtn, shareBtn]);
+  // Row 1: Like
+  buttons.push([likeBtn]);
+
+  // Row 2: Join channel if exists
+  if (creatorChannel) {
+    buttons.push([{ text: '📢 عضویت در کانال', url: `https://t.me/${creatorChannel.replace('@', '')}` }]);
   }
+
+  // Row 3: Share
+  buttons.push([shareBtn]);
+
   return { inline_keyboard: buttons };
 };
 
-// Main update handler
-export const handleUpdate = async (update, env, ctx) => {
+// -------------------- Telegram Update Handler --------------------
+export const handleUpdate = async (update, env) => {
   const { BOT_TOKEN, BOT_KV, BOT_USERNAME } = env;
-  
+
   try {
     if (update.message) {
       await handleMessage(update.message, BOT_TOKEN, BOT_KV, BOT_USERNAME);
@@ -95,12 +104,14 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
   const userId = message.from.id;
   const text = message.text || '';
 
-  // Check channel membership
+  // Global required channel enforcement for bot usage
   const isMember = await checkChannelMembership(token, userId, REQUIRED_CHANNEL);
   if (!isMember) {
-    return sendMessage(token, chatId, 
+    return sendMessage(
+      token,
+      chatId,
       `❌ برای استفاده از ربات باید عضو کانال ${REQUIRED_CHANNEL} باشید.\n\n` +
-      `لطفاً ابتدا عضو شوید سپس دوباره تلاش کنید.`,
+        `لطفاً ابتدا عضو شوید سپس دوباره تلاش کنید.`,
       {
         inline_keyboard: [
           [{ text: '📢 عضویت در کانال', url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
@@ -110,100 +121,104 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
     );
   }
 
-  // Handle deep-link payload: /start <likeId>
-  if (text.startsWith('/start ') || text.startsWith('/start@')) {
-    // Extract payload after /start or /start@BotName
-    const parts = text.split(' ');
-    const payload = parts.length > 1 ? parts[1].trim() : '';
+  // Deep link payload: /start <likeId>
+  if (text.startsWith('/start ')) {
+    const payload = text.split(' ')[1]?.trim() || '';
     if (payload && payload.startsWith('like_')) {
       const likeData = await kv.get(`like:${payload}`);
       if (likeData) {
         const like = JSON.parse(likeData);
-        const creatorChannel = await kv.get(`channel:${like.creator}`);
-        const hasChannel = !!creatorChannel;
-        await sendMessage(token, chatId,
+        const creatorChannel = (await kv.get(`channel:${like.creator}`)) || '';
+        await sendMessage(
+          token,
+          chatId,
           `👍 ${like.name}\n\n❤️ تعداد لایک: ${like.likes || 0}`,
-          createLikeKeyboard(like, botUsername || 'your_bot', hasChannel)
+          createLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
         );
         return;
       }
     }
   }
 
+  // Default /start
   if (text === '/start') {
-    await sendMessage(token, chatId, 
+    await sendMessage(
+      token,
+      chatId,
       '🎉 سلام! به ربات لایک خوش آمدید\n\n' +
-      'با این ربات می‌تونید لایک‌های جعلی برای پست‌هاتون بسازید!\n\n' +
-      '🔹 ساخت لایک: برای ساخت لایک جدید\n' +
-      '🔹 تنظیمات: برای تنظیم کانال اجباری\n' +
-      '🔹 آمار: مشاهده آمار لایک‌ها',
+        'با این ربات می‌تونید برای آیتم‌هاتون لایک جمع کنید!\n\n' +
+        '🔹 ساخت لایک: برای ساخت لایک جدید\n' +
+        '🔹 تنظیمات: برای تنظیم کانال اجباری سازنده\n' +
+        '🔹 آمار: مشاهده آمار لایک‌ها',
       mainMenuKeyboard()
     );
-    
+
     // Save user
-    await kv.put(`user:${userId}`, JSON.stringify({
-      id: userId,
-      username: message.from.username || '',
-      first_name: message.from.first_name || '',
-      joined_at: Date.now()
-    }));
-    
+    await kv.put(
+      `user:${userId}`,
+      JSON.stringify({
+        id: userId,
+        username: message.from.username || '',
+        first_name: message.from.first_name || '',
+        joined_at: Date.now()
+      })
+    );
     return;
   }
 
-  // Handle waiting for like name
+  // State handling
   const userState = await kv.get(`state:${userId}`);
+
+  // User typed like name
   if (userState === 'waiting_like_name') {
     const likeId = `like_${userId}_${Date.now()}`;
-    await kv.put(`like:${likeId}`, JSON.stringify({
+
+    const likeObj = {
       id: likeId,
       name: text,
       creator: userId,
       likes: 0,
       created_at: Date.now()
-    }));
-    
+    };
+
+    await kv.put(`like:${likeId}`, JSON.stringify(likeObj));
     await kv.delete(`state:${userId}`);
-    
-    // Check if user has set a channel
-    const userChannel = await kv.get(`channel:${userId}`);
-    const hasChannel = !!userChannel;
-    
-    const likeObj = { id: likeId, name: text, creator: userId, likes: 0 };
-    await sendMessage(token, chatId,
+
+    const creatorChannel = (await kv.get(`channel:${userId}`)) || '';
+
+    await sendMessage(
+      token,
+      chatId,
       `✅ لایک شما ساخته شد!\n\n` +
-      `📝 نام: ${text}\n` +
-      `👍 تعداد لایک: 0\n\n` +
-      `این پیام رو به هر جایی که می‌خواهید بفرستید تا دیگران بتوانند لایک کنند!`,
-      createLikeKeyboard(likeObj, botUsername || 'your_bot', hasChannel)
+        `📝 نام: ${likeObj.name}\n` +
+        `👍 تعداد لایک: 0\n\n` +
+        `این پیام رو به هر جایی که می‌خواهید بفرستید تا دیگران بتوانند لایک کنند!`,
+      createLikeKeyboard(likeObj, botUsername || 'your_bot', creatorChannel)
     );
     return;
   }
 
-  // Handle waiting for channel username
+  // User typed channel username
   if (userState === 'waiting_channel') {
     let channelUsername = text.trim();
-    if (!channelUsername.startsWith('@')) {
-      channelUsername = '@' + channelUsername;
-    }
-    
+    if (!channelUsername.startsWith('@')) channelUsername = '@' + channelUsername;
+
     await kv.put(`channel:${userId}`, channelUsername);
     await kv.delete(`state:${userId}`);
-    
-    await sendMessage(token, chatId,
+
+    await sendMessage(
+      token,
+      chatId,
       `✅ کانال شما تنظیم شد!\n\n` +
-      `📢 کانال: ${channelUsername}\n\n` +
-      `از حالا برای لایک کردن لایک‌های شما، کاربران باید عضو این کانال باشند.`,
+        `📢 کانال: ${channelUsername}\n\n` +
+        `از حالا برای لایک کردن لایک‌های شما، کاربران باید عضو این کانال باشند.`,
       settingsKeyboard()
     );
     return;
   }
 
-  // Default response
-  await sendMessage(token, chatId, 
-    'لطفاً از منوی زیر استفاده کنید:', 
-    mainMenuKeyboard()
-  );
+  // Fallback
+  await sendMessage(token, chatId, 'لطفاً از منوی زیر استفاده کنید:', mainMenuKeyboard());
 };
 
 // Callback query handler
@@ -213,18 +228,18 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
   const userId = query.from.id;
   const data = query.data;
 
-  // Answer callback query
+  // Answer callback query immediately
   await telegramAPI(token, 'answerCallbackQuery', { callback_query_id: query.id });
 
   if (data === 'check_membership') {
     const isMember = await checkChannelMembership(token, userId, REQUIRED_CHANNEL);
     if (isMember) {
-      await editMessage(token, chatId, messageId,
-        '✅ عضویت شما تأیید شد! حالا می‌تونید از ربات استفاده کنید.',
-        mainMenuKeyboard()
-      );
+      await editMessage(token, chatId, messageId, '✅ عضویت شما تأیید شد! حالا می‌تونید از ربات استفاده کنید.', mainMenuKeyboard());
     } else {
-      await editMessage(token, chatId, messageId,
+      await editMessage(
+        token,
+        chatId,
+        messageId,
         `❌ هنوز عضو کانال نشدید!\n\nلطفاً ابتدا عضو کانال ${REQUIRED_CHANNEL} شوید.`,
         {
           inline_keyboard: [
@@ -238,9 +253,11 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
   }
 
   if (data === 'settings') {
-    await editMessage(token, chatId, messageId,
-      '🔧 تنظیمات ربات:\n\n' +
-      'می‌تونید کانال اجباری برای لایک‌هاتون تنظیم کنید.',
+    await editMessage(
+      token,
+      chatId,
+      messageId,
+      '🔧 تنظیمات ربات:\n\n' + 'می‌تونید کانال اجباری برای لایک‌هاتون تنظیم کنید.',
       settingsKeyboard()
     );
     return;
@@ -248,68 +265,73 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
 
   if (data === 'set_channel') {
     await kv.put(`state:${userId}`, 'waiting_channel');
-    await editMessage(token, chatId, messageId,
-      '📢 لطفاً username کانال خود را وارد کنید:\n\n' +
-      'مثال: @mychannel یا mychannel\n\n' +
-      '⚠️ حتماً ربات را در کانال ادمین کنید!'
+    await editMessage(
+      token,
+      chatId,
+      messageId,
+      '📢 لطفاً username کانال خود را وارد کنید:\n\n' + 'مثال: @mychannel یا mychannel\n\n' + '⚠️ حتماً ربات را در کانال ادمین کنید!'
     );
     return;
   }
 
   if (data === 'create_like') {
     await kv.put(`state:${userId}`, 'waiting_like_name');
-    await editMessage(token, chatId, messageId,
-      '📝 لطفاً نام مطلبی که می‌خواهید براش لایک بگیرید را وارد کنید:\n\n' +
-      'مثال: عکس جدیدم، ویدیوی باحالم، نظرتون چیه؟'
+    await editMessage(
+      token,
+      chatId,
+      messageId,
+      '📝 لطفاً نام موردی که می‌خواهید براش لایک بگیرید را وارد کنید:\n\n' + 'مثال: عکس جدیدم، ویدیوی باحالم، نظرتون چیه؟'
     );
     return;
   }
 
   if (data === 'stats') {
-    // Get user's likes
-    const allKeys = await kv.list({ prefix: 'like:' });
+    const likeKeys = await kv.list({ prefix: 'like:' });
     let userLikes = 0;
     let totalLikes = 0;
 
-    for (const key of allKeys.keys) {
+    for (const key of likeKeys.keys) {
       const likeData = await kv.get(key.name);
-      if (likeData) {
-        const like = JSON.parse(likeData);
-        if (like.creator === userId) {
-          userLikes++;
-        }
-        totalLikes += like.likes || 0;
-      }
+      if (!likeData) continue;
+      const like = JSON.parse(likeData);
+      if (like.creator === userId) userLikes++;
+      totalLikes += like.likes || 0;
     }
 
-    await editMessage(token, chatId, messageId,
+    await editMessage(
+      token,
+      chatId,
+      messageId,
       `📊 آمار شما:\n\n` +
-      `🎯 لایک‌های ساخته شده: ${userLikes}\n` +
-      `👍 مجموع لایک‌های دریافتی: ${totalLikes}\n\n` +
-      `📈 همچنان در حال رشد!`,
+        `🎯 لایک‌های ساخته شده: ${userLikes}\n` +
+        `👍 مجموع لایک‌های دریافتی: ${totalLikes}\n\n` +
+        `📈 همچنان در حال رشد!`,
       { inline_keyboard: [[{ text: '🏠 بازگشت', callback_data: 'back_main' }]] }
     );
     return;
   }
 
   if (data === 'back_main') {
-    await editMessage(token, chatId, messageId,
+    await editMessage(
+      token,
+      chatId,
+      messageId,
       '🎉 سلام! به ربات لایک خوش آمدید\n\n' +
-      'با این ربات می‌تونید لایک‌های جعلی برای پست‌هاتون بسازید!\n\n' +
-      '🔹 ساخت لایک: برای ساخت لایک جدید\n' +
-      '🔹 تنظیمات: برای تنظیم کانال اجباری\n' +
-      '🔹 آمار: مشاهده آمار لایک‌ها',
+        'با این ربات می‌تونید برای آیتم‌هاتون لایک جمع کنید!\n\n' +
+        '🔹 ساخت لایک: برای ساخت لایک جدید\n' +
+        '🔹 تنظیمات: برای تنظیم کانال اجباری سازنده\n' +
+        '🔹 آمار: مشاهده آمار لایک‌ها',
       mainMenuKeyboard()
     );
     return;
   }
 
-  // Handle like button
+  // Like button
   if (data.startsWith('like_')) {
     const likeId = data;
-    const likeData = await kv.get(`like:${likeId}`);
-    
-    if (!likeData) {
+    const likeRaw = await kv.get(`like:${likeId}`);
+
+    if (!likeRaw) {
       await telegramAPI(token, 'answerCallbackQuery', {
         callback_query_id: query.id,
         text: '❌ لایک پیدا نشد!',
@@ -318,23 +340,10 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       return;
     }
 
-    const like = JSON.parse(likeData);
-    
-    // Check if user already liked
-    const userLikeKey = `liked:${likeId}:${userId}`;
-    const hasLiked = await kv.get(userLikeKey);
-    
-    if (hasLiked) {
-      await telegramAPI(token, 'answerCallbackQuery', {
-        callback_query_id: query.id,
-        text: '⚠️ شما قبلاً لایک کرده‌اید!',
-        show_alert: true
-      });
-      return;
-    }
+    const like = JSON.parse(likeRaw);
 
-    // Check channel membership for like creator's channel
-    const creatorChannel = await kv.get(`channel:${like.creator}`);
+    // If creator has a channel, require membership
+    const creatorChannel = (await kv.get(`channel:${like.creator}`)) || '';
     if (creatorChannel) {
       const isMember = await checkChannelMembership(token, userId, creatorChannel);
       if (!isMember) {
@@ -347,17 +356,30 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       }
     }
 
+    // Check double-like by same user (30-day memory)
+    const userLikeKey = `liked:${likeId}:${userId}`;
+    const hasLiked = await kv.get(userLikeKey);
+    if (hasLiked) {
+      await telegramAPI(token, 'answerCallbackQuery', {
+        callback_query_id: query.id,
+        text: '⚠️ شما قبلاً لایک کرده‌اید!',
+        show_alert: true
+      });
+      return;
+    }
+
     // Add like
     like.likes = (like.likes || 0) + 1;
     await kv.put(`like:${likeId}`, JSON.stringify(like));
-    await kv.put(userLikeKey, 'true', { expirationTtl: 86400 * 30 }); // 30 days
+    await kv.put(userLikeKey, 'true', { expirationTtl: 86400 * 30 });
 
-    // Update message
-    const hasChannel = !!creatorChannel;
-    await editMessage(token, chatId, messageId,
-      `👍 ${like.name}\n\n` +
-      `❤️ تعداد لایک: ${like.likes}`,
-      createLikeKeyboard(like, botUsername || 'your_bot', hasChannel)
+    // Update message text + keyboard (live count)
+    await editMessage(
+      token,
+      chatId,
+      messageId,
+      `👍 ${like.name}\n\n` + `❤️ تعداد لایک: ${like.likes}`,
+      createLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
     );
 
     await telegramAPI(token, 'answerCallbackQuery', {
@@ -368,23 +390,23 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
   }
 };
 
-// Handle HTTP requests (for admin panel and API)
+// -------------------- Pages HTTP Handler (Admin Panel + APIs) --------------------
 const handleRequest = async (request, env) => {
   const url = new URL(request.url);
   const { BOT_KV } = env;
 
-  // CORS headers
+  // CORS
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type'
   };
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Admin Panel
+  // Admin Panel (GET /)
   if (url.pathname === '/' || url.pathname === '') {
     const html = `
       <!DOCTYPE html>
@@ -415,8 +437,8 @@ const handleRequest = async (request, env) => {
                   padding: 30px; 
                   text-align: center; 
               }
-              .header h1 { font-size: 2.5rem; margin-bottom: 10px; }
-              .header p { font-size: 1.1rem; opacity: 0.9; }
+              .header h1 { font-size: 2.2rem; margin-bottom: 10px; }
+              .header p { font-size: 1rem; opacity: 0.9; }
               .stats { 
                   display: grid; 
                   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
@@ -430,38 +452,31 @@ const handleRequest = async (request, env) => {
                   border-radius: 15px; 
                   text-align: center; 
                   box-shadow: 0 5px 15px rgba(0,0,0,0.08);
-                  transition: transform 0.3s ease;
               }
-              .stat-card:hover { transform: translateY(-5px); }
-              .stat-number { font-size: 2.5rem; font-weight: bold; color: #667eea; margin-bottom: 10px; }
-              .stat-label { color: #666; font-size: 1rem; }
+              .stat-number { font-size: 2rem; font-weight: bold; color: #667eea; margin-bottom: 10px; }
+              .stat-label { color: #666; font-size: 0.95rem; }
               .content { padding: 30px; }
               .btn { 
                   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                   color: white; 
-                  padding: 12px 25px; 
+                  padding: 10px 20px; 
                   border: none; 
-                  border-radius: 25px; 
+                  border-radius: 22px; 
                   cursor: pointer; 
-                  font-size: 1rem;
-                  transition: all 0.3s ease;
+                  font-size: 0.95rem;
                   text-decoration: none;
                   display: inline-block;
                   margin: 5px;
               }
-              .btn:hover { 
-                  transform: translateY(-2px); 
-                  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-              }
               .section { margin-bottom: 30px; }
-              .section h2 { color: #333; margin-bottom: 15px; font-size: 1.5rem; }
+              .section h2 { color: #333; margin-bottom: 15px; font-size: 1.3rem; }
           </style>
       </head>
       <body>
           <div class="container">
               <div class="header">
                   <h1>🤖 پنل مدیریت ربات لایک</h1>
-                  <p>مدیریت و نظارت بر عملکرد ربات تلگرام</p>
+                  <p>نمایش سریع وضعیت ربات و پایگاه داده</p>
               </div>
               
               <div class="stats">
@@ -486,16 +501,10 @@ const handleRequest = async (request, env) => {
               <div class="content">
                   <div class="section">
                       <h2>🔧 مدیریت</h2>
-                      <a href="/api/stats" class="btn">📊 مشاهده آمار کامل</a>
-                      <a href="/api/users" class="btn">👥 لیست کاربران</a>
-                      <a href="/api/likes" class="btn">👍 لیست لایک‌ها</a>
+                      <a href="/api/stats" class="btn" target="_blank">📊 مشاهده آمار کامل</a>
+                      <a href="/api/users" class="btn" target="_blank">👥 لیست کاربران</a>
+                      <a href="/api/likes" class="btn" target="_blank">👍 لیست لایک‌ها</a>
                       <button class="btn" onclick="refreshStats()">🔄 بروزرسانی</button>
-                  </div>
-                  
-                  <div class="section">
-                      <h2>📈 آمار سریع</h2>
-                      <p>ربات در حال حاضر فعال است و آماده پاسخگویی به کاربران می‌باشد.</p>
-                      <p>برای مشاهده جزئیات بیشتر از لینک‌های بالا استفاده کنید.</p>
                   </div>
               </div>
           </div>
@@ -514,48 +523,42 @@ const handleRequest = async (request, env) => {
                       console.error('Error fetching stats:', error);
                   }
               }
-              
-              // Load stats on page load
               refreshStats();
           </script>
       </body>
       </html>
     `;
-    
+
     return new Response(html, {
       headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' }
     });
   }
 
-  // API Routes
+  // API: /api/stats
   if (url.pathname === '/api/stats') {
     try {
       const userKeys = await BOT_KV.list({ prefix: 'user:' });
       const likeKeys = await BOT_KV.list({ prefix: 'like:' });
-      
+
       let totalLikes = 0;
       let todayActivity = 0;
       const today = new Date().toDateString();
-      
+
       for (const key of likeKeys.keys) {
         const likeData = await BOT_KV.get(key.name);
-        if (likeData) {
-          const like = JSON.parse(likeData);
-          totalLikes += like.likes || 0;
-          
-          if (new Date(like.created_at).toDateString() === today) {
-            todayActivity++;
-          }
-        }
+        if (!likeData) continue;
+        const like = JSON.parse(likeData);
+        totalLikes += like.likes || 0;
+        if (new Date(like.created_at).toDateString() === today) todayActivity++;
       }
-      
+
       const stats = {
         totalUsers: userKeys.keys.length,
         totalPosts: likeKeys.keys.length,
         totalLikes,
         todayActivity
       };
-      
+
       return new Response(JSON.stringify(stats), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -567,18 +570,15 @@ const handleRequest = async (request, env) => {
     }
   }
 
+  // API: /api/users
   if (url.pathname === '/api/users') {
     try {
       const userKeys = await BOT_KV.list({ prefix: 'user:' });
       const users = [];
-      
       for (const key of userKeys.keys) {
         const userData = await BOT_KV.get(key.name);
-        if (userData) {
-          users.push(JSON.parse(userData));
-        }
+        if (userData) users.push(JSON.parse(userData));
       }
-      
       return new Response(JSON.stringify(users), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -590,18 +590,15 @@ const handleRequest = async (request, env) => {
     }
   }
 
+  // API: /api/likes
   if (url.pathname === '/api/likes') {
     try {
       const likeKeys = await BOT_KV.list({ prefix: 'like:' });
       const likes = [];
-      
       for (const key of likeKeys.keys) {
         const likeData = await BOT_KV.get(key.name);
-        if (likeData) {
-          likes.push(JSON.parse(likeData));
-        }
+        if (likeData) likes.push(JSON.parse(likeData));
       }
-      
       return new Response(JSON.stringify(likes), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -613,24 +610,18 @@ const handleRequest = async (request, env) => {
     }
   }
 
-  // Health check
+  // Health
   if (url.pathname === '/health') {
-    return new Response(JSON.stringify({ 
-      status: 'ok', 
-      timestamp: new Date().toISOString() 
-    }), {
+    return new Response(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 
   // 404
-  return new Response('Not Found', { 
-    status: 404, 
-    headers: corsHeaders 
-  });
+  return new Response('Not Found', { status: 404, headers: corsHeaders });
 };
 
-// Export default handler for Cloudflare Pages
+// Default export for Cloudflare Pages
 export default {
   fetch: handleRequest
 };
