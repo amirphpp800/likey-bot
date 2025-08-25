@@ -3,7 +3,7 @@
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
 // Bot version (bump this on each update)
-const BOT_VERSION = '1.1';
+const BOT_VERSION = '1.2';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
@@ -108,6 +108,8 @@ const createCreatorLikeKeyboard = (like, botUsername, creatorChannel = '') => {
   if (creatorChannel) {
     base.inline_keyboard.push([{ text: '📤 ارسال پست به کانال', callback_data: `publish_like:${like.id}` }]);
   }
+  // Creator helper: get share link in bot chat
+  base.inline_keyboard.push([{ text: '🔗 دریافت لینک اشتراک', callback_data: `get_share_link:${like.id}` }]);
   return base;
 };
 
@@ -198,6 +200,61 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
         first_name: message.from.first_name || '',
         joined_at: Date.now()
       })
+    );
+    return;
+  }
+
+  // Creator helper: return share link
+  if (data.startsWith('get_share_link:')) {
+    const likeId = data.split(':')[1];
+    const likeRaw = await kv.get(`like:${likeId}`);
+    if (!likeRaw) {
+      await telegramAPI(token, 'answerCallbackQuery', {
+        callback_query_id: query.id,
+        text: 'این مورد پیدا نشد 🥲',
+        show_alert: true
+      });
+      return;
+    }
+    const like = JSON.parse(likeRaw);
+    if (like.creator !== userId) {
+      await telegramAPI(token, 'answerCallbackQuery', {
+        callback_query_id: query.id,
+        text: '⛔️ فقط سازنده می‌تونه لینک رو بگیره.',
+        show_alert: true
+      });
+      return;
+    }
+
+    const payload = like.token || like.id;
+    if (!botUsername || botUsername === 'your_bot') {
+      await sendMessage(
+        token,
+        chatId,
+        `🔗 لینک دیپ‌لینک شما آماده‌ست:\n\n` +
+          `t.me/<BOT_USERNAME>?start=${payload}\n\n` +
+          `برای فعال شدن لینک، مقدار BOT_USERNAME رو در تنظیمات بات ست کن.`
+      );
+      return;
+    }
+
+    const deepLink = buildDeepLink(botUsername, payload);
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=${encodeURIComponent(`بیاین باهم لایک کنیم: ${like.name}`)}`;
+
+    await sendMessage(
+      token,
+      chatId,
+      `🔗 لینک اشتراک آماده‌ست:\n${deepLink}`,
+      {
+        inline_keyboard: [
+          [
+            { text: '✅ بازکردن لینک', url: deepLink }
+          ],
+          [
+            { text: '🔗 ارسال برای دوستان', url: shareUrl }
+          ]
+        ]
+      }
     );
     return;
   }
