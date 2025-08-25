@@ -3,7 +3,7 @@
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
 // Bot version (bump this on each update)
-const BOT_VERSION = '1.1';
+const BOT_VERSION = '1.6';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
@@ -27,15 +27,18 @@ const editMessage = async (token, chatId, messageId, text, keyboard = null) => {
   return telegramAPI(token, 'editMessageText', params);
 };
 
+// Normalize a Telegram username: remove leading '@'
+const normalizeUsername = (u = '') => (u || '').replace(/^@+/, '');
+
 // Resolve bot username automatically (cache in KV)
 const resolveBotUsername = async (token, kv, fallbackEnvUsername) => {
-  if (fallbackEnvUsername && fallbackEnvUsername !== 'your_bot') return fallbackEnvUsername;
+  if (fallbackEnvUsername && fallbackEnvUsername !== 'your_bot') return normalizeUsername(fallbackEnvUsername);
   const cached = await kv.get('bot_username');
-  if (cached) return cached;
+  if (cached) return normalizeUsername(cached);
   try {
     const resp = await telegramAPI(token, 'getMe');
     const data = await resp.json();
-    const uname = data?.result?.username || '';
+    const uname = normalizeUsername(data?.result?.username || '');
     if (uname) {
       await kv.put('bot_username', uname);
       return uname;
@@ -43,7 +46,7 @@ const resolveBotUsername = async (token, kv, fallbackEnvUsername) => {
   } catch (e) {
     // ignore
   }
-  return fallbackEnvUsername || 'your_bot';
+  return normalizeUsername(fallbackEnvUsername) || 'your_bot';
 };
 
 const checkChannelMembership = async (token, userId, channelUsername) => {
@@ -76,7 +79,7 @@ const settingsKeyboard = () => ({
 });
 
 // Deep link to open bot with a specific like payload (id or token)
-const buildDeepLink = (botUsername, payload) => `https://t.me/${botUsername}?start=${payload}`;
+const buildDeepLink = (botUsername, payload) => `https://t.me/${normalizeUsername(botUsername)}?start=${payload}`;
 
 /*
  createLikeKeyboard (for bot chats):
@@ -228,46 +231,6 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
     );
     return;
   }
-
-  // Creator helper: send deep-link share message
-  if (data.startsWith('get_share_link:')) {
-    const likeId = data.split(':')[1];
-    const likeRaw = await kv.get(`like:${likeId}`);
-    if (!likeRaw) {
-      await telegramAPI(token, 'answerCallbackQuery', {
-        callback_query_id: query.id,
-        text: 'این پست پیدا نشد 🥲',
-        show_alert: true
-      });
-      return;
-    }
-    const like = JSON.parse(likeRaw);
-    if (like.creator !== userId) {
-      await telegramAPI(token, 'answerCallbackQuery', {
-        callback_query_id: query.id,
-        text: '⛔️ این پست متعلق به شما نیست.',
-        show_alert: true
-      });
-      return;
-    }
-    const payload = like.token || like.id;
-    const deepLink = buildDeepLink(botUsername || 'your_bot', payload);
-    await sendMessage(
-      token,
-      chatId,
-      `🔗 لینک اشتراک این پست:\n\n${deepLink}\n\n` +
-        'برای جذب لایک بیشتر، این لینک را هرجا خواستی ارسال کن یا از دکمه زیر استفاده کن.',
-      {
-        inline_keyboard: [
-          [{ text: '🔗 باز کردن لینک', url: deepLink }],
-          [{ text: '💫 اشتراک‌گذاری در تلگرام', url: `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=${encodeURIComponent('🔥 بیا لایک بدیم!')}` }]
-        ]
-      }
-    );
-    return;
-  }
-
-  // (Moved) Creator helper: get_share_link handled in handleCallbackQuery()
 
   // State handling
 
