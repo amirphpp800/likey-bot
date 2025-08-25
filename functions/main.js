@@ -1,8 +1,8 @@
-// Telegram Like Bot - Cloudflare Workers Version
+// Telegram Like Bot - Cloudflare Workers Version (Fixed)
 import { Bot, webhookCallback } from "https://esm.sh/grammy";
 
 // Bot configuration
-const bot = new Bot(process.env.BOT_TOKEN || "");
+const bot = new Bot("");
 
 // Channel ID for mandatory subscription
 const REQUIRED_CHANNEL = "@NoiDUsers";
@@ -36,9 +36,10 @@ bot.command("start", async (ctx) => {
 bot.callbackQuery("check_subscription", async (ctx) => {
   const isSubscribed = await checkSubscription(ctx, REQUIRED_CHANNEL);
   if (isSubscribed) {
+    await ctx.answerCallbackQuery();
     await showMainMenu(ctx);
   } else {
-    await ctx.answer("هنوز عضو کانال نشده‌اید! لطفاً ابتدا عضو شوید.");
+    await ctx.answerCallbackQuery("هنوز عضو کانال نشده‌اید! لطفاً ابتدا عضو شوید.", { show_alert: true });
   }
 });
 
@@ -60,19 +61,27 @@ async function showMainMenu(ctx) {
     buttons.push([{ text: "کانال تنظیم شده: " + userChannel, callback_data: "view_channel" }]);
   }
 
-  await ctx.reply(
-    `سلام ${username}! 👋\n\nبه ربات لایک خوش آمدید!\n\nچه کاری می‌خواهید انجام دهید؟`,
-    {
+  const message = `سلام ${username}! 👋\n\nبه ربات لایک خوش آمدید!\n\nچه کاری می‌خواهید انجام دهید؟`;
+
+  if (ctx.callbackQuery) {
+    await ctx.editMessageText(message, {
       reply_markup: {
         inline_keyboard: buttons
       }
-    }
-  );
+    });
+  } else {
+    await ctx.reply(message, {
+      reply_markup: {
+        inline_keyboard: buttons
+      }
+    });
+  }
 }
 
 // Create like
 bot.callbackQuery("create_like", async (ctx) => {
-  await ctx.reply(
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
     "لطفاً نام لایک مورد نظر خود را وارد کنید:\n\nمثال: لایک من، محصول جدید، ویدیو و...",
     {
       reply_markup: {
@@ -87,64 +96,116 @@ bot.callbackQuery("create_like", async (ctx) => {
   await setKV(`user_state:${ctx.from.id}`, "waiting_like_name");
 });
 
-// Handle text messages for like creation
+// Handle text messages for like creation and channel setup
 bot.on("message:text", async (ctx) => {
   const userId = ctx.from.id;
   const userState = await getKV(`user_state:${userId}`);
   
   if (userState === "waiting_like_name") {
-    const likeName = ctx.message.text;
-    
-    // Generate unique like ID
-    const likeId = `like_${Date.now()}_${userId}`;
-    
-    // Save like data
-    await setKV(`like:${likeId}`, {
-      name: likeName,
-      userId: userId,
-      username: ctx.from.username || ctx.from.first_name,
-      createdAt: Date.now(),
-      likes: 0
-    });
-    
-    // Clear user state
-    await deleteKV(`user_state:${userId}`);
-    
-    // Check if user has set up a channel
-    const userChannel = await getKV(`user_channel:${userId}`);
-    
-    const buttons = [
-      [{ text: "اشتراک بنر 📢", callback_data: `share_banner:${likeId}` }]
-    ];
-    
-    if (userChannel) {
-      buttons.push([
-        { text: "لایک (نیاز به عضویت) 👍", callback_data: `like_with_sub:${likeId}` }
-      ]);
-    } else {
-      buttons.push([
-        { text: "لایک 👍", callback_data: `like_simple:${likeId}` }
-      ]);
-    }
-    
-    await ctx.reply(
-      `✅ لایک شما با موفقیت ساخته شد!\n\n📝 نام: ${likeName}\n🆔 شناسه: ${likeId}\n\nحالا می‌توانید بنر لایک را اشتراک‌گذاری کنید:`,
-      {
-        reply_markup: {
-          inline_keyboard: buttons
-        }
-      }
-    );
+    await handleLikeCreation(ctx);
+  } else if (userState === "waiting_channel_name") {
+    await handleChannelSetup(ctx);
   }
 });
 
+// Handle like creation
+async function handleLikeCreation(ctx) {
+  const userId = ctx.from.id;
+  const likeName = ctx.message.text;
+  
+  // Generate unique like ID
+  const likeId = `like_${Date.now()}_${userId}`;
+  
+  // Save like data
+  const likeData = {
+    name: likeName,
+    userId: userId,
+    username: ctx.from.username || ctx.from.first_name,
+    createdAt: Date.now(),
+    likes: 0
+  };
+  
+  await setKV(`like:${likeId}`, likeData);
+  
+  // Add to user's likes list
+  let userLikes = await getKV(`user_likes:${userId}`) || [];
+  userLikes.push(likeId);
+  await setKV(`user_likes:${userId}`, userLikes);
+  
+  // Clear user state
+  await deleteKV(`user_state:${userId}`);
+  
+  // Check if user has set up a channel
+  const userChannel = await getKV(`user_channel:${userId}`);
+  
+  const buttons = [
+    [{ text: "اشتراک بنر 📢", callback_data: `share_banner:${likeId}` }]
+  ];
+  
+  if (userChannel) {
+    buttons.push([
+      { text: "لایک (نیاز به عضویت) 👍", callback_data: `like_with_sub:${likeId}` }
+    ]);
+  } else {
+    buttons.push([
+      { text: "لایک 👍", callback_data: `like_simple:${likeId}` }
+    ]);
+  }
+  
+  buttons.push([{ text: "🔙 بازگشت به منو", callback_data: "back_to_menu" }]);
+  
+  await ctx.reply(
+    `✅ لایک شما با موفقیت ساخته شد!\n\n📝 نام: ${likeName}\n🆔 شناسه: ${likeId}\n\nحالا می‌توانید بنر لایک را اشتراک‌گذاری کنید:`,
+    {
+      reply_markup: {
+        inline_keyboard: buttons
+      }
+    }
+  );
+}
+
+// Handle channel setup
+async function handleChannelSetup(ctx) {
+  const userId = ctx.from.id;
+  let channelName = ctx.message.text.trim();
+  
+  // Add @ if not present
+  if (!channelName.startsWith('@')) {
+    channelName = '@' + channelName;
+  }
+  
+  // Validate channel name
+  if (channelName.length < 4) {
+    await ctx.reply("نام کانال باید حداقل 3 کاراکتر باشد!");
+    return;
+  }
+  
+  // Save channel
+  await setKV(`user_channel:${userId}`, channelName);
+  
+  // Clear user state
+  await deleteKV(`user_state:${userId}`);
+  
+  await ctx.reply(
+    `✅ کانال ${channelName} با موفقیت تنظیم شد!\n\nحالا لایک‌های شما نیاز به عضویت در این کانال خواهند داشت.`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔙 بازگشت به منو", callback_data: "back_to_menu" }]
+        ]
+      }
+    }
+  );
+}
+
 // Share banner
 bot.callbackQuery(/^share_banner:(.+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
   const likeId = ctx.match[1];
   const likeData = await getKV(`like:${likeId}`);
   
   if (!likeData) {
-    return ctx.answer("لایک مورد نظر یافت نشد!");
+    return ctx.answerCallbackQuery("لایک مورد نظر یافت نشد!", { show_alert: true });
   }
   
   const userChannel = await getKV(`user_channel:${likeData.userId}`);
@@ -163,7 +224,7 @@ bot.callbackQuery(/^share_banner:(.+)$/, async (ctx) => {
     ]);
   }
   
-  await ctx.reply(
+  await ctx.editMessageText(
     `🎯 لایک: ${likeData.name}\n\n👤 سازنده: ${likeData.username}\n❤️ تعداد لایک: ${likeData.likes}\n\nبرای لایک کردن روی دکمه زیر کلیک کنید:`,
     {
       reply_markup: {
@@ -176,10 +237,19 @@ bot.callbackQuery(/^share_banner:(.+)$/, async (ctx) => {
 // Simple like (no subscription required)
 bot.callbackQuery(/^like_simple:(.+)$/, async (ctx) => {
   const likeId = ctx.match[1];
+  const userId = ctx.from.id;
+  
   const likeData = await getKV(`like:${likeId}`);
   
   if (!likeData) {
-    return ctx.answer("لایک مورد نظر یافت نشد!");
+    return ctx.answerCallbackQuery("لایک مورد نظر یافت نشد!", { show_alert: true });
+  }
+  
+  // Check if user already liked
+  const alreadyLiked = await getKV(`user_liked:${userId}:${likeId}`);
+  
+  if (alreadyLiked) {
+    return ctx.answerCallbackQuery("شما قبلاً این لایک را کرده‌اید!", { show_alert: true });
   }
   
   // Increment like count
@@ -187,10 +257,9 @@ bot.callbackQuery(/^like_simple:(.+)$/, async (ctx) => {
   await setKV(`like:${likeId}`, likeData);
   
   // Save user's like
-  const userId = ctx.from.id;
   await setKV(`user_liked:${userId}:${likeId}`, Date.now());
   
-  await ctx.answer("✅ لایک شما ثبت شد!");
+  await ctx.answerCallbackQuery("✅ لایک شما ثبت شد!");
   
   // Update the message
   await ctx.editMessageText(
@@ -204,25 +273,33 @@ bot.callbackQuery(/^like_simple:(.+)$/, async (ctx) => {
 // Like with subscription required
 bot.callbackQuery(/^like_with_sub:(.+)$/, async (ctx) => {
   const likeId = ctx.match[1];
+  const userId = ctx.from.id;
+  
   const likeData = await getKV(`like:${likeId}`);
   
   if (!likeData) {
-    return ctx.answer("لایک مورد نظر یافت نشد!");
+    return ctx.answerCallbackQuery("لایک مورد نظر یافت نشد!", { show_alert: true });
   }
   
   const userChannel = await getKV(`user_channel:${likeData.userId}`);
+  
+  if (!userChannel) {
+    return ctx.answerCallbackQuery("کانال تنظیم نشده است!", { show_alert: true });
+  }
   
   // Check if user is subscribed to the channel
   const isSubscribed = await checkSubscription(ctx, userChannel);
   
   if (!isSubscribed) {
-    return ctx.answer(
+    await ctx.answerCallbackQuery();
+    return ctx.editMessageText(
       `برای لایک کردن باید عضو کانال ${userChannel} باشید!`,
       {
         reply_markup: {
           inline_keyboard: [
             [{ text: "عضویت در کانال 📢", url: `https://t.me/${userChannel.slice(1)}` }],
-            [{ text: "بررسی عضویت ✅", callback_data: `check_sub_for_like:${likeId}` }]
+            [{ text: "بررسی عضویت ✅", callback_data: `check_sub_for_like:${likeId}` }],
+            [{ text: "🔙 بازگشت", callback_data: `share_banner:${likeId}` }]
           ]
         }
       }
@@ -230,11 +307,10 @@ bot.callbackQuery(/^like_with_sub:(.+)$/, async (ctx) => {
   }
   
   // Check if user already liked
-  const userId = ctx.from.id;
   const alreadyLiked = await getKV(`user_liked:${userId}:${likeId}`);
   
   if (alreadyLiked) {
-    return ctx.answer("شما قبلاً این لایک را کرده‌اید!");
+    return ctx.answerCallbackQuery("شما قبلاً این لایک را کرده‌اید!", { show_alert: true });
   }
   
   // Increment like count
@@ -244,16 +320,13 @@ bot.callbackQuery(/^like_with_sub:(.+)$/, async (ctx) => {
   // Save user's like
   await setKV(`user_liked:${userId}:${likeId}`, Date.now());
   
-  await ctx.answer("✅ لایک شما ثبت شد!");
+  await ctx.answerCallbackQuery("✅ لایک شما ثبت شد!");
   
   // Update the message
   await ctx.editMessageText(
     `🎯 لایک: ${likeData.name}\n\n👤 سازنده: ${likeData.username}\n❤️ تعداد لایک: ${likeData.likes}\n\nبرای لایک کردن روی دکمه زیر کلیک کنید:`,
     {
       reply_markup: ctx.callbackQuery.message.reply_markup
-        .inline_keyboard.filter(button => 
-          !button[0].callback_data?.startsWith('like_with_sub:')
-        )
     }
   );
 });
@@ -261,48 +334,64 @@ bot.callbackQuery(/^like_with_sub:(.+)$/, async (ctx) => {
 // Check subscription for like
 bot.callbackQuery(/^check_sub_for_like:(.+)$/, async (ctx) => {
   const likeId = ctx.match[1];
+  const userId = ctx.from.id;
+  
   const likeData = await getKV(`like:${likeId}`);
   
   if (!likeData) {
-    return ctx.answer("لایک مورد نظر یافت نشد!");
+    return ctx.answerCallbackQuery("لایک مورد نظر یافت نشد!", { show_alert: true });
   }
   
   const userChannel = await getKV(`user_channel:${likeData.userId}`);
   const isSubscribed = await checkSubscription(ctx, userChannel);
   
   if (isSubscribed) {
-    // Process the like
-    const userId = ctx.from.id;
+    // Check if user already liked
     const alreadyLiked = await getKV(`user_liked:${userId}:${likeId}`);
     
     if (alreadyLiked) {
-      return ctx.answer("شما قبلاً این لایک را کرده‌اید!");
+      return ctx.answerCallbackQuery("شما قبلاً این لایک را کرده‌اید!", { show_alert: true });
     }
     
+    // Process the like
     likeData.likes += 1;
     await setKV(`like:${likeId}`, likeData);
     await setKV(`user_liked:${userId}:${likeId}`, Date.now());
     
-    await ctx.answer("✅ لایک شما ثبت شد!");
+    await ctx.answerCallbackQuery("✅ لایک شما ثبت شد!");
+    
+    // Return to banner view
+    await ctx.editMessageText(
+      `🎯 لایک: ${likeData.name}\n\n👤 سازنده: ${likeData.username}\n❤️ تعداد لایک: ${likeData.likes}\n\nبرای لایک کردن روی دکمه زیر کلیک کنید:`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "لایک (نیاز به عضویت) 👍", callback_data: `like_with_sub:${likeId}` }],
+            [{ text: "🔙 بازگشت", callback_data: "back_to_menu" }]
+          ]
+        }
+      }
+    );
   } else {
-    await ctx.answer("هنوز عضو کانال نشده‌اید!");
+    await ctx.answerCallbackQuery("هنوز عضو کانال نشده‌اید!", { show_alert: true });
   }
 });
 
 // Channel settings
 bot.callbackQuery("channel_settings", async (ctx) => {
+  await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
   const userChannel = await getKV(`user_channel:${userId}`);
   
   let message = "⚙️ تنظیمات کانال\n\n";
   
   if (userChannel) {
-    message += `کانال فعلی: ${userChannel}\n\nبرای تغییر کانال، نام کانال جدید را وارد کنید:`;
+    message += `کانال فعلی: ${userChannel}\n\nبرای تغییر کانال، نام کانال جدید را وارد کنید (بدون @):`;
   } else {
-    message += "هیچ کانالی تنظیم نشده است.\n\nبرای تنظیم کانال، نام کانال را وارد کنید:";
+    message += "هیچ کانالی تنظیم نشده است.\n\nبرای تنظیم کانال، نام کانال را وارد کنید (بدون @):";
   }
   
-  await ctx.reply(message, {
+  await ctx.editMessageText(message, {
     reply_markup: {
       inline_keyboard: [
         [{ text: "🔙 بازگشت", callback_data: "back_to_menu" }]
@@ -314,46 +403,9 @@ bot.callbackQuery("channel_settings", async (ctx) => {
   await setKV(`user_state:${userId}`, "waiting_channel_name");
 });
 
-// Handle channel name input
-bot.on("message:text", async (ctx) => {
-  const userId = ctx.from.id;
-  const userState = await getKV(`user_state:${userId}`);
-  
-  if (userState === "waiting_channel_name") {
-    let channelName = ctx.message.text.trim();
-    
-    // Remove @ if present
-    if (channelName.startsWith('@')) {
-      channelName = channelName.slice(1);
-    }
-    
-    // Validate channel name
-    if (channelName.length < 3) {
-      await ctx.reply("نام کانال باید حداقل 3 کاراکتر باشد!");
-      return;
-    }
-    
-    // Save channel
-    await setKV(`user_channel:${userId}`, `@${channelName}`);
-    
-    // Clear user state
-    await deleteKV(`user_state:${userId}`);
-    
-    await ctx.reply(
-      `✅ کانال ${channelName} با موفقیت تنظیم شد!\n\nحالا لایک‌های شما نیاز به عضویت در این کانال خواهند داشت.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🔙 بازگشت به منو", callback_data: "back_to_menu" }]
-          ]
-        }
-      }
-    );
-  }
-});
-
 // Like statistics
 bot.callbackQuery("like_stats", async (ctx) => {
+  await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
   
   // Get user's likes
@@ -366,19 +418,23 @@ bot.callbackQuery("like_stats", async (ctx) => {
   } else {
     message += `تعداد لایک‌های ساخته شده: ${userLikes.length}\n\n`;
     
+    let totalLikes = 0;
     for (let i = 0; i < Math.min(userLikes.length, 5); i++) {
       const likeData = await getKV(`like:${userLikes[i]}`);
       if (likeData) {
         message += `${i + 1}. ${likeData.name} - ${likeData.likes} لایک\n`;
+        totalLikes += likeData.likes;
       }
     }
     
     if (userLikes.length > 5) {
       message += `\nو ${userLikes.length - 5} لایک دیگر...`;
     }
+    
+    message += `\n\nمجموع لایک‌های دریافتی: ${totalLikes}`;
   }
   
-  await ctx.reply(message, {
+  await ctx.editMessageText(message, {
     reply_markup: {
       inline_keyboard: [
         [{ text: "🔙 بازگشت", callback_data: "back_to_menu" }]
@@ -389,6 +445,7 @@ bot.callbackQuery("like_stats", async (ctx) => {
 
 // Back to menu
 bot.callbackQuery("back_to_menu", async (ctx) => {
+  await ctx.answerCallbackQuery();
   await showMainMenu(ctx);
 });
 
@@ -404,23 +461,34 @@ async function checkSubscription(ctx, channel) {
 }
 
 // KV Storage functions for Cloudflare Workers
-async function getKV(key) {
+async function getKV(key, env = null) {
   try {
-    // For Cloudflare Workers, we'll use a simple in-memory storage
-    // In production, you should use Cloudflare KV or D1
-    return globalThis.__BOT_KV__?.[key] || null;
+    if (env && env.BOT_KV) {
+      // Use Cloudflare KV in production
+      const value = await env.BOT_KV.get(key);
+      return value ? JSON.parse(value) : null;
+    } else {
+      // Use in-memory storage for development
+      return globalThis.__BOT_KV__?.[key] || null;
+    }
   } catch (error) {
     console.error("Error getting KV:", error);
     return null;
   }
 }
 
-async function setKV(key, value) {
+async function setKV(key, value, env = null) {
   try {
-    if (!globalThis.__BOT_KV__) {
-      globalThis.__BOT_KV__ = {};
+    if (env && env.BOT_KV) {
+      // Use Cloudflare KV in production
+      await env.BOT_KV.put(key, JSON.stringify(value));
+    } else {
+      // Use in-memory storage for development
+      if (!globalThis.__BOT_KV__) {
+        globalThis.__BOT_KV__ = {};
+      }
+      globalThis.__BOT_KV__[key] = value;
     }
-    globalThis.__BOT_KV__[key] = value;
     return true;
   } catch (error) {
     console.error("Error setting KV:", error);
@@ -428,10 +496,16 @@ async function setKV(key, value) {
   }
 }
 
-async function deleteKV(key) {
+async function deleteKV(key, env = null) {
   try {
-    if (globalThis.__BOT_KV__ && globalThis.__BOT_KV__[key]) {
-      delete globalThis.__BOT_KV__[key];
+    if (env && env.BOT_KV) {
+      // Use Cloudflare KV in production
+      await env.BOT_KV.delete(key);
+    } else {
+      // Use in-memory storage for development
+      if (globalThis.__BOT_KV__ && globalThis.__BOT_KV__[key]) {
+        delete globalThis.__BOT_KV__[key];
+      }
     }
     return true;
   } catch (error) {
@@ -448,10 +522,20 @@ bot.catch((err) => {
 // Export for Cloudflare Workers
 export default {
   async fetch(request, env, ctx) {
-    // Set environment variables
-    process.env.BOT_TOKEN = env.BOT_TOKEN;
+    // Set bot token from environment
+    if (env.BOT_TOKEN) {
+      bot.token = env.BOT_TOKEN;
+    }
     
-    // Handle webhook
-    return webhookCallback(bot, "cloudflare-mod")(request);
+    // Make env available to KV functions
+    globalThis.__BOT_ENV__ = env;
+    
+    try {
+      // Handle webhook
+      return await webhookCallback(bot, "cloudflare-mod")(request);
+    } catch (error) {
+      console.error("Webhook error:", error);
+      return new Response("Error", { status: 500 });
+    }
   }
 };
