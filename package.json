@@ -1,0 +1,11 @@
+{
+  "name": "likegit-bot-main",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "grammy": "^1.20.0",
+    "@vercel/kv": "^1.0.1"
+  }
+}
+
