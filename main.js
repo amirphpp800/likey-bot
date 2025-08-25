@@ -55,28 +55,34 @@ const settingsKeyboard = () => ({
   ]
 });
 
-const createLikeKeyboard = (likeId, hasChannel = false) => {
+// Build deep-link to open bot with a specific like payload
+const buildDeepLink = (botUsername, likeId) => `https://t.me/${botUsername}?start=${likeId}`;
+
+// Keyboard for a like object with live count and share button
+// like: { id, name, likes, creator }
+const createLikeKeyboard = (like, botUsername, hasChannel = false) => {
   const buttons = [];
+  const likeBtn = { text: `👍 لایک (${like.likes || 0})`, callback_data: like.id };
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, like.id))}&text=${encodeURIComponent(`برای حمایت، این مورد را لایک کنید: ${like.name}`)}`;
+  const shareBtn = { text: '🔗 اشتراک‌گذاری', url: shareUrl };
+
   if (hasChannel) {
-    buttons.push([
-      { text: '👍 لایک', callback_data: `like_${likeId}` },
-      { text: '📢 اشتراک', url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }
-    ]);
+    buttons.push([likeBtn, shareBtn]);
   } else {
-    buttons.push([{ text: '👍 لایک', callback_data: `like_${likeId}` }]);
+    buttons.push([likeBtn, shareBtn]);
   }
   return { inline_keyboard: buttons };
 };
 
 // Main update handler
 export const handleUpdate = async (update, env, ctx) => {
-  const { BOT_TOKEN, BOT_KV } = env;
+  const { BOT_TOKEN, BOT_KV, BOT_USERNAME } = env;
   
   try {
     if (update.message) {
-      await handleMessage(update.message, BOT_TOKEN, BOT_KV);
+      await handleMessage(update.message, BOT_TOKEN, BOT_KV, BOT_USERNAME);
     } else if (update.callback_query) {
-      await handleCallbackQuery(update.callback_query, BOT_TOKEN, BOT_KV);
+      await handleCallbackQuery(update.callback_query, BOT_TOKEN, BOT_KV, BOT_USERNAME);
     }
   } catch (error) {
     console.error('Error handling update:', error);
@@ -84,7 +90,7 @@ export const handleUpdate = async (update, env, ctx) => {
 };
 
 // Message handler
-const handleMessage = async (message, token, kv) => {
+const handleMessage = async (message, token, kv, botUsername = '') => {
   const chatId = message.chat.id;
   const userId = message.from.id;
   const text = message.text || '';
@@ -102,6 +108,26 @@ const handleMessage = async (message, token, kv) => {
         ]
       }
     );
+  }
+
+  // Handle deep-link payload: /start <likeId>
+  if (text.startsWith('/start ') || text.startsWith('/start@')) {
+    // Extract payload after /start or /start@BotName
+    const parts = text.split(' ');
+    const payload = parts.length > 1 ? parts[1].trim() : '';
+    if (payload && payload.startsWith('like_')) {
+      const likeData = await kv.get(`like:${payload}`);
+      if (likeData) {
+        const like = JSON.parse(likeData);
+        const creatorChannel = await kv.get(`channel:${like.creator}`);
+        const hasChannel = !!creatorChannel;
+        await sendMessage(token, chatId,
+          `👍 ${like.name}\n\n❤️ تعداد لایک: ${like.likes || 0}`,
+          createLikeKeyboard(like, botUsername || 'your_bot', hasChannel)
+        );
+        return;
+      }
+    }
   }
 
   if (text === '/start') {
@@ -143,12 +169,13 @@ const handleMessage = async (message, token, kv) => {
     const userChannel = await kv.get(`channel:${userId}`);
     const hasChannel = !!userChannel;
     
+    const likeObj = { id: likeId, name: text, creator: userId, likes: 0 };
     await sendMessage(token, chatId,
       `✅ لایک شما ساخته شد!\n\n` +
       `📝 نام: ${text}\n` +
       `👍 تعداد لایک: 0\n\n` +
       `این پیام رو به هر جایی که می‌خواهید بفرستید تا دیگران بتوانند لایک کنند!`,
-      createLikeKeyboard(likeId, hasChannel)
+      createLikeKeyboard(likeObj, botUsername || 'your_bot', hasChannel)
     );
     return;
   }
@@ -180,7 +207,7 @@ const handleMessage = async (message, token, kv) => {
 };
 
 // Callback query handler
-const handleCallbackQuery = async (query, token, kv) => {
+const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
   const chatId = query.message.chat.id;
   const messageId = query.message.message_id;
   const userId = query.from.id;
@@ -330,7 +357,7 @@ const handleCallbackQuery = async (query, token, kv) => {
     await editMessage(token, chatId, messageId,
       `👍 ${like.name}\n\n` +
       `❤️ تعداد لایک: ${like.likes}`,
-      createLikeKeyboard(likeId, hasChannel)
+      createLikeKeyboard(like, botUsername || 'your_bot', hasChannel)
     );
 
     await telegramAPI(token, 'answerCallbackQuery', {
