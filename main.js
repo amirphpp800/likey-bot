@@ -3,7 +3,7 @@
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
 // Bot version (bump this on each update)
-const BOT_VERSION = '1.0';
+const BOT_VERSION = '1.1';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
