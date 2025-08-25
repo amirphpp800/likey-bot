@@ -1,14 +1,19 @@
-// Catch-all Pages Function to delegate to main.js default export (Worker-style)
-// This keeps your existing routes (/, /api/*, /f/*, etc.) working on Pages
-
-import app from '../main.js';
+// [[path]].js
+import { handleUpdate } from '../main.js';
 
 export async function onRequest(context) {
   const { request, env, waitUntil } = context;
-  if (!app || typeof app.fetch !== 'function') {
-    return new Response('Application not initialized', { status: 500 });
+
+  if (request.method === "POST") {
+    try {
+      const update = await request.json();
+      await handleUpdate(update, env, { waitUntil });
+      return new Response("ok");
+    } catch (err) {
+      return new Response("bad request", { status: 400 });
+    }
   }
-  return app.fetch(request, env, { waitUntil });
+
+  // برای GET یا هر چیز دیگه
+  return new Response("Bot is running");
 }
-
-
