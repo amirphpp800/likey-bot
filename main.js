@@ -3,7 +3,7 @@
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
 // Bot version (bump this on each update)
-const BOT_VERSION = '1.3';
+const BOT_VERSION = '1.4';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
@@ -62,15 +62,16 @@ const checkChannelMembership = async (token, userId, channelUsername) => {
 // -------------------- Keyboards --------------------
 const mainMenuKeyboard = () => ({
   inline_keyboard: [
-    [{ text: '✨ ساخت لایک جدید', callback_data: 'create_like' }],
+    [{ text: '🚀 ساخت پست جدید', callback_data: 'create_like' }],
+    [{ text: '📊 پست‌های من', callback_data: 'my_posts' }],
     [{ text: '⚙️ تنظیمات', callback_data: 'settings' }]
   ]
 });
 
 const settingsKeyboard = () => ({
   inline_keyboard: [
-    [{ text: '📢 تعریف کانال من', callback_data: 'set_channel' }],
-    [{ text: '⬅️ بازگشت به منو', callback_data: 'back_main' }]
+    [{ text: '📺 تنظیم کانال', callback_data: 'set_channel' }],
+    [{ text: '🏠 بازگشت به خانه', callback_data: 'back_main' }]
   ]
 });
 
@@ -92,14 +93,14 @@ const createLikeKeyboard = (like, botUsername, creatorChannel = '') => {
 
   // Row 2: Join channel if exists and is public (@username)
   if (creatorChannel && creatorChannel.startsWith('@')) {
-    buttons.push([{ text: '📢 عضویت در کانال', url: `https://t.me/${creatorChannel.replace('@', '')}` }]);
+    buttons.push([{ text: '🔔 عضویت در کانال', url: `https://t.me/${creatorChannel.replace('@', '')}` }]);
   }
 
   // Row 3: Share button only if botUsername provided and not placeholder
   if (botUsername && botUsername !== 'your_bot') {
     const payload = like.token || like.id;
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, payload))}&text=${encodeURIComponent(`بیاین باهم لایک کنیم: ${like.name}`)}`;
-    const shareBtn = { text: '🔗 ارسال برای دوستان', url: shareUrl };
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, payload))}&text=${encodeURIComponent(`🔥 ${like.name} رو لایک کن!\n\n👆 روی لینک بزن و حمایتت رو نشون بده`)}`;
+    const shareBtn = { text: '💫 اشتراک‌گذاری', url: shareUrl };
     buttons.push([shareBtn]);
   }
 
@@ -116,7 +117,7 @@ const createChannelLikeKeyboard = (like, creatorChannel = '') => {
   const likeBtn = { text: `👍 بزن لایک (${like.likes || 0})`, callback_data: like.id };
   buttons.push([likeBtn]);
   if (creatorChannel && creatorChannel.startsWith('@')) {
-    buttons.push([{ text: '📢 عضویت در کانال', url: `https://t.me/${creatorChannel.replace('@', '')}` }]);
+    buttons.push([{ text: '🔔 عضویت در کانال', url: `https://t.me/${creatorChannel.replace('@', '')}` }]);
   }
   return { inline_keyboard: buttons };
 };
@@ -125,7 +126,7 @@ const createChannelLikeKeyboard = (like, creatorChannel = '') => {
 const createCreatorLikeKeyboard = (like, botUsername, creatorChannel = '') => {
   const base = createLikeKeyboard(like, botUsername, creatorChannel);
   if (creatorChannel) {
-    base.inline_keyboard.push([{ text: '📤 ارسال پست به کانال', callback_data: `publish_like:${like.id}` }]);
+    base.inline_keyboard.push([{ text: '📢 انتشار در کانال', callback_data: `publish_like:${like.id}` }]);
   }
   // Creator helper: get share link in bot chat
   base.inline_keyboard.push([{ text: '🔗 دریافت لینک اشتراک', callback_data: `get_share_link:${like.id}` }]);
@@ -162,11 +163,11 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
       return sendMessage(
         token,
         chatId,
-        `سلام! 💙\nبرای استفاده از بات، اول عضو کانال ${REQUIRED_CHANNEL} شو و برگرد.`,
+        `سلام دوست عزیز! 👋\n\n🎯 برای استفاده از این بات فوق‌العاده، کافیه عضو کانال ما بشی:\n\n${REQUIRED_CHANNEL}\n\n✨ بعدش برگرد و از امکانات جذاب بات لذت ببر!`,
         {
           inline_keyboard: [
-            [{ text: '📢 عضویت در کانال', url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
-            [{ text: '🔄 عضوم شدم، بررسی کن', callback_data: 'check_membership' }]
+            [{ text: '🚀 عضویت در کانال', url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
+            [{ text: '✅ عضو شدم، ادامه بدیم!', callback_data: 'check_membership' }]
           ]
         }
       );
@@ -209,8 +210,7 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
     await sendMessage(
       token,
       chatId,
-      '🎉 خوش اومدی!\nبا این بات برای هر چیزی لایک جمع کن و رشدش رو ببین.👇\n\n' +
-        `ℹ️ نسخه بات: ${BOT_VERSION}`,
+      `🎉 سلام و خوش اومدی!\n\n🚀 با این بات می‌تونی برای هر چیزی که دوست داری لایک جمع کنی:\n\n• عکس‌هات\n• ویدیوهات\n• پست‌هات\n• هر چیز دیگه‌ای!\n\n💫 آماده‌ای شروع کنیم؟\n\n📱 نسخه: ${BOT_VERSION}`,
       mainMenuKeyboard()
     );
 
@@ -254,10 +254,10 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
     await sendMessage(
       token,
       chatId,
-      `✅ آماده‌ست!\n\n` +
-        `📝 نام: ${likeObj.name}\n` +
-        `👍 لایک فعلی: 0\n\n` +
-        `می‌تونی مستقیم به کانالت بفرستیش یا با دوستات به اشتراک بذاری.`,
+      `🎯 عالی! پستت آماده شد:\n\n` +
+        `📝 ${likeObj.name}\n` +
+        `❤️ لایک‌ها: 0\n\n` +
+        `🔥 حالا می‌تونی:\n• پستت رو تو کانالت منتشر کنی\n• با دوستات به اشتراک بذاری\n• لینک اختصاصیت رو بگیری`,
       createCreatorLikeKeyboard(likeObj, botUsername || 'your_bot', creatorChannel)
     );
     return;
@@ -276,9 +276,10 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
     await sendMessage(
       token,
       chatId,
-      `✅ کانالت ثبت شد!\n\n` +
-        `📢 ${channelUsername.startsWith('@') ? channelUsername : 'کانال خصوصی (chat_id ذخیره شد)'}\n\n` +
-        `از این به بعد برای لایک پست‌های تو، اول عضویت توی این کانال چک می‌شه.`,
+      `🎯 عالی! کانالت با موفقیت ثبت شد:\n\n` +
+        `📺 ${channelUsername.startsWith('@') ? channelUsername : 'کانال خصوصی (شناسه ذخیره شد)'}\n\n` +
+        `🔒 از حالا به بعد، کاربران قبل از لایک کردن پست‌هات باید عضو این کانال باشن.\n\n` +
+        `💡 نکته: حتماً بات رو ادمین کانالت کن تا بتونه پست‌ها رو منتشر کنه!`,
       settingsKeyboard()
     );
     return;
@@ -301,13 +302,13 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
   if (data === 'check_membership') {
     const isMember = await checkChannelMembership(token, userId, REQUIRED_CHANNEL);
     if (isMember) {
-      await editMessage(token, chatId, messageId, '✅ عالی! عضویتت تأیید شد. بزن بریم! 🙌', mainMenuKeyboard());
+      await editMessage(token, chatId, messageId, '🎉 فوق‌العاده! عضویتت تأیید شد.\n\n🚀 حالا می‌تونی از تمام امکانات بات استفاده کنی. بزن بریم!', mainMenuKeyboard());
     } else {
       await editMessage(
         token,
         chatId,
         messageId,
-        `هنوز عضو نیستی!\nاول عضو ${REQUIRED_CHANNEL} شو، بعد اینجا رو بزن.`,
+        `😔 متأسفانه هنوز عضو نشدی!\n\n🔄 لطفاً اول عضو ${REQUIRED_CHANNEL} شو، بعد دوباره امتحان کن.`,
         {
           inline_keyboard: [
             [{ text: '📢 عضویت در کانال', url: `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}` }],
@@ -324,7 +325,7 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       token,
       chatId,
       messageId,
-      '⚙️ تنظیمات:\nیک کانال معرفی کن تا قبل از لایک، عضویت در اون چک بشه.',
+      '⚙️ تنظیمات بات:\n\n📺 می‌تونی یک کانال معرفی کنی تا کاربران قبل از لایک کردن پست‌هات، باید عضو اون کانال باشن.\n\n💡 این کار باعث افزایش اعضای کانالت میشه!',
       settingsKeyboard()
     );
     return;
@@ -336,7 +337,7 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       token,
       chatId,
       messageId,
-      '📢 یوزرنیم کانالت رو بفرست (مثلاً @mychannel).\nیادت نره بات رو ادمین کانال کنی.'
+      '📺 یوزرنیم کانالت رو بفرست:\n\n• برای کانال عمومی: @mychannel\n• برای کانال خصوصی: -100xxxxxxxxxx\n\n⚠️ مهم: حتماً بات رو ادمین کانالت کن!'
     );
     return;
   }
@@ -347,20 +348,110 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       token,
       chatId,
       messageId,
-      '📝 اسم چیزی که می‌خوای براش لایک جمع کنی رو بفرست (مثلاً: عکس جدیدم)'
+      '✍️ اسم پستی که می‌خوای براش لایک جمع کنی رو بنویس:\n\n💡 مثال‌ها:\n• عکس جدیدم از سفر\n• ویدیو آموزشی جدید\n• آهنگ جدیدم\n• هر چیز دیگه‌ای که دوست داری!'
     );
     return;
   }
 
-  
+  if (data === 'my_posts') {
+    // Show user's created posts
+    const userLikes = await kv.list({ prefix: `like:like_${userId}_` });
+    if (userLikes.keys.length === 0) {
+      await editMessage(
+        token,
+        chatId,
+        messageId,
+        '📭 هنوز هیچ پستی نساختی!\n\n🚀 برای شروع، روی "ساخت پست جدید" بزن و اولین پستت رو بساز.',
+        {
+          inline_keyboard: [
+            [{ text: '🚀 ساخت پست جدید', callback_data: 'create_like' }],
+            [{ text: '🏠 بازگشت به خانه', callback_data: 'back_main' }]
+          ]
+        }
+      );
+      return;
+    }
+
+    let postsText = '📊 پست‌های من:\n\n';
+    const posts = [];
+    
+    for (const key of userLikes.keys.slice(0, 10)) { // Show max 10 recent posts
+      const likeData = await kv.get(key.name);
+      if (likeData) {
+        const like = JSON.parse(likeData);
+        posts.push(like);
+      }
+    }
+
+    posts.sort((a, b) => b.created_at - a.created_at); // Sort by newest first
+    
+    posts.forEach((like, index) => {
+      const date = new Date(like.created_at).toLocaleDateString('fa-IR');
+      postsText += `${index + 1}. 📝 ${like.name}\n`;
+      postsText += `   ❤️ ${like.likes || 0} لایک | 📅 ${date}\n\n`;
+    });
+
+    if (userLikes.keys.length > 10) {
+      postsText += `... و ${userLikes.keys.length - 10} پست دیگر\n\n`;
+    }
+
+    postsText += '💡 برای مدیریت پست‌هات، یکی رو انتخاب کن یا پست جدید بساز!';
+
+    const buttons = [];
+    // Show recent posts as buttons
+    posts.slice(0, 5).forEach((like, index) => {
+      const shortName = like.name.length > 25 ? like.name.substring(0, 25) + '...' : like.name;
+      buttons.push([{ text: `📝 ${shortName} (${like.likes || 0})`, callback_data: `view_post:${like.id}` }]);
+    });
+    
+    buttons.push([{ text: '🚀 ساخت پست جدید', callback_data: 'create_like' }]);
+    buttons.push([{ text: '🏠 بازگشت به خانه', callback_data: 'back_main' }]);
+
+    await editMessage(token, chatId, messageId, postsText, { inline_keyboard: buttons });
+    return;
+  }
+
+  if (data.startsWith('view_post:')) {
+    const likeId = data.split(':')[1];
+    const likeRaw = await kv.get(`like:${likeId}`);
+    if (!likeRaw) {
+      await telegramAPI(token, 'answerCallbackQuery', {
+        callback_query_id: query.id,
+        text: 'این پست پیدا نشد 🥲',
+        show_alert: true
+      });
+      return;
+    }
+    const like = JSON.parse(likeRaw);
+    if (like.creator !== userId) {
+      await telegramAPI(token, 'answerCallbackQuery', {
+        callback_query_id: query.id,
+        text: '⛔️ این پست متعلق به شما نیست.',
+        show_alert: true
+      });
+      return;
+    }
+
+    const creatorChannel = (await kv.get(`channel:${userId}`)) || '';
+    const date = new Date(like.created_at).toLocaleDateString('fa-IR');
+    
+    await editMessage(
+      token,
+      chatId,
+      messageId,
+      `📝 ${like.name}\n\n❤️ تعداد لایک‌ها: ${like.likes || 0}\n📅 تاریخ ساخت: ${date}\n\n🔥 از دکمه‌های زیر برای مدیریت پستت استفاده کن:`,
+      createCreatorLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
+    );
+    return;
+  }
 
   if (data === 'back_main') {
     await editMessage(
       token,
       chatId,
       messageId,
-      '🎉 خوش اومدی! با این بات برای هر چیزی لایک جمع کن.👇\n\n' +
-        `ℹ️ نسخه بات: ${BOT_VERSION}`,
+      '🏠 به خانه برگشتی!\n\n🚀 از منوی زیر هر کاری که می‌خوای انجام بده:\n\n' +
+        `📱 نسخه بات: ${BOT_VERSION}`,
       mainMenuKeyboard()
     );
     return;
