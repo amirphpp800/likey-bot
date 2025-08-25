@@ -57,28 +57,45 @@ const settingsKeyboard = () => ({
 const buildDeepLink = (botUsername, likeId) => `https://t.me/${botUsername}?start=${likeId}`;
 
 /*
- createLikeKeyboard:
+ createLikeKeyboard (for bot chats):
  - Like button with live count
- - Optional "Join Channel" if creator has a channel
- - Share button to forward a deep link
+ - Optional "Join Channel" if creator has a public @channel
+ - Optional Share button (only if botUsername is set)
 */
 const createLikeKeyboard = (like, botUsername, creatorChannel = '') => {
   const buttons = [];
   const likeBtn = { text: `👍 بزن لایک (${like.likes || 0})`, callback_data: like.id };
-  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, like.id))}&text=${encodeURIComponent(`بیاین باهم لایک کنیم: ${like.name}`)}`;
-  const shareBtn = { text: '🔗 ارسال برای دوستان', url: shareUrl };
 
   // Row 1: Like
   buttons.push([likeBtn]);
 
-  // Row 2: Join channel if exists
-  if (creatorChannel) {
+  // Row 2: Join channel if exists and is public (@username)
+  if (creatorChannel && creatorChannel.startsWith('@')) {
     buttons.push([{ text: '📢 عضویت در کانال', url: `https://t.me/${creatorChannel.replace('@', '')}` }]);
   }
 
-  // Row 3: Share
-  buttons.push([shareBtn]);
+  // Row 3: Share button only if botUsername provided and not placeholder
+  if (botUsername && botUsername !== 'your_bot') {
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, like.id))}&text=${encodeURIComponent(`بیاین باهم لایک کنیم: ${like.name}`)}`;
+    const shareBtn = { text: '🔗 ارسال برای دوستان', url: shareUrl };
+    buttons.push([shareBtn]);
+  }
 
+  return { inline_keyboard: buttons };
+};
+
+/*
+ createChannelLikeKeyboard (for posts inside channels):
+ - Only Like button (and optional Join if public @channel)
+ - No share button
+*/
+const createChannelLikeKeyboard = (like, creatorChannel = '') => {
+  const buttons = [];
+  const likeBtn = { text: `👍 بزن لایک (${like.likes || 0})`, callback_data: like.id };
+  buttons.push([likeBtn]);
+  if (creatorChannel && creatorChannel.startsWith('@')) {
+    buttons.push([{ text: '📢 عضویت در کانال', url: `https://t.me/${creatorChannel.replace('@', '')}` }]);
+  }
   return { inline_keyboard: buttons };
 };
 
@@ -86,7 +103,7 @@ const createLikeKeyboard = (like, botUsername, creatorChannel = '') => {
 const createCreatorLikeKeyboard = (like, botUsername, creatorChannel = '') => {
   const base = createLikeKeyboard(like, botUsername, creatorChannel);
   if (creatorChannel) {
-    base.inline_keyboard.push([{ text: '📤 ارسال به کانال', callback_data: `publish_like:${like.id}` }]);
+    base.inline_keyboard.push([{ text: '📤 ارسال پست به کانال', callback_data: `publish_like:${like.id}` }]);
   }
   return base;
 };
@@ -207,7 +224,9 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
   // User typed channel username
   if (userState === 'waiting_channel') {
     let channelUsername = text.trim();
-    if (!channelUsername.startsWith('@')) channelUsername = '@' + channelUsername;
+    // Support private channels using numeric chat_id like -100xxxxxxxxxx
+    const isNumericId = /^-100\d{5,}$/.test(channelUsername);
+    if (!isNumericId && !channelUsername.startsWith('@')) channelUsername = '@' + channelUsername;
 
     await kv.put(`channel:${userId}`, channelUsername);
     await kv.delete(`state:${userId}`);
@@ -216,7 +235,7 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
       token,
       chatId,
       `✅ کانالت ثبت شد!\n\n` +
-        `📢 ${channelUsername}\n\n` +
+        `📢 ${channelUsername.startsWith('@') ? channelUsername : 'کانال خصوصی (chat_id ذخیره شد)'}\n\n` +
         `از این به بعد برای لایک پست‌های تو، اول عضویت توی این کانال چک می‌شه.`,
       settingsKeyboard()
     );
@@ -339,7 +358,7 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       token,
       creatorChannel,
       `👍 ${like.name}\n\n❤️ تعداد لایک: ${like.likes || 0}`,
-      createLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
+      createChannelLikeKeyboard(like, creatorChannel)
     );
     const ok = await resp.json().then(r => r.ok).catch(() => false);
     if (!ok) {
@@ -357,14 +376,16 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
     });
 
     // Optionally update creator's message keyboard/text
-    const creatorChannelUsername = creatorChannel.replace('@', '');
+    const creatorChannelUsername = creatorChannel.startsWith('@') ? creatorChannel.replace('@', '') : '';
     await editMessage(
       token,
       chatId,
       messageId,
-      `✅ به کانال @${creatorChannelUsername} فرستاده شد.\n\n` +
+      (creatorChannelUsername
+        ? `✅ به کانال @${creatorChannelUsername} فرستاده شد.\n\n`
+        : `✅ به کانالت فرستاده شد.\n\n`) +
         `پست رو فوروارد کن تا لایک بیشتری جمع بشه.`,
-      createCreatorLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
+      createCreatorLikeKeyboard(like, botUsername || '', creatorChannel)
     );
     return;
   }
@@ -417,12 +438,14 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
     await kv.put(userLikeKey, 'true', { expirationTtl: 86400 * 30 });
 
     // Update message text + keyboard (live count)
+    // Pick keyboard based on where the message lives (channel vs chat)
+    const isChannel = (query.message.chat?.type === 'channel') || `${chatId}`.startsWith('-100');
     await editMessage(
       token,
       chatId,
       messageId,
       `👍 ${like.name}\n\n` + `❤️ تعداد لایک: ${like.likes}`,
-      createLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
+      isChannel ? createChannelLikeKeyboard(like, creatorChannel) : createLikeKeyboard(like, botUsername || '', creatorChannel)
     );
 
     await telegramAPI(token, 'answerCallbackQuery', {
