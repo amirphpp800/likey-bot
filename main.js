@@ -23,6 +23,7 @@ const KV_KEYS = {
   usersCount: 'stats:users_count',
   likesCount: 'stats:likes_created',
   likePrefix: 'like:', // like:<id> => {id,title,count,requiredChannel,creatorId,createdAt}
+  likeUserPrefix: 'like_user:', // like_user:<likeId>:<userId> => '1'
   botMe: 'cache:bot_me',
   userChannelPrefix: 'user_channel:', // user_channel:<userId> => { id, username, title }
 };
@@ -90,6 +91,21 @@ async function saveLike(env, like) {
 async function getLike(env, likeId) {
   const raw = await env.BOT_KV.get(KV_KEYS.likePrefix + likeId);
   return raw ? JSON.parse(raw) : null;
+}
+
+// وضعیت لایک کاربر برای هر لایک خاص
+function likeUserKey(likeId, userId) {
+  return `${KV_KEYS.likeUserPrefix}${likeId}:${userId}`;
+}
+async function hasUserLiked(env, likeId, userId) {
+  const v = await env.BOT_KV.get(likeUserKey(likeId, userId));
+  return !!v;
+}
+async function setUserLiked(env, likeId, userId) {
+  await env.BOT_KV.put(likeUserKey(likeId, userId), '1');
+}
+async function clearUserLiked(env, likeId, userId) {
+  await env.BOT_KV.delete(likeUserKey(likeId, userId));
 }
 
 function uid() {
@@ -432,7 +448,20 @@ async function handleCallback(update, env) {
       }
     }
 
-    like.count += 1;
+    // هر کاربر فقط یک‌بار می‌تواند لایک کند؛ با کلیک دوباره، لایک برداشته می‌شود (toggle)
+    const already = await hasUserLiked(env, like.id, userId);
+    let msgText = '';
+    if (already) {
+      // برداشتن لایک
+      if (like.count > 0) like.count -= 1;
+      await clearUserLiked(env, like.id, userId);
+      msgText = `💔 لایک برداشته شد. مجموع: ${like.count}`;
+    } else {
+      // ثبت لایک
+      like.count += 1;
+      await setUserLiked(env, like.id, userId);
+      msgText = `❤️ لایک شد! مجموع: ${like.count}`;
+    }
     await saveLike(env, like);
 
     // به‌روزرسانی دکمه لایک در همان پیام (اگر پیام قابل ویرایش باشد)
@@ -444,7 +473,7 @@ async function handleCallback(update, env) {
       });
     } catch {}
 
-    return tgApi(env).answerCallbackQuery({ callback_query_id: cb.id, text: `❤️ ${like.count} تا شد!` });
+    return tgApi(env).answerCallbackQuery({ callback_query_id: cb.id, text: msgText });
   }
 
   // دکمه‌های دیگر
