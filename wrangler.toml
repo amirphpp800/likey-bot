@@ -1,0 +1,17 @@
+name = "telegram-like-bot"
+main = "main.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV Namespace for storing bot data (optional - you can use in-memory storage for testing)
+# [[kv_namespaces]]
+# binding = "BOT_KV"
+# id = "your-kv-namespace-id"
+# preview_id = "your-preview-kv-namespace-id"
+
+# Environment variables
+[vars]
+REQUIRED_CHANNEL = "@NoiDUsers"
+
+# Secrets (set these via wrangler secret put)
+# BOT_TOKEN = "your-bot-token-here"
