@@ -2,6 +2,8 @@
 
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
+// Bot version (bump this on each update)
+const BOT_VERSION = '1.0';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
@@ -53,8 +55,8 @@ const settingsKeyboard = () => ({
   ]
 });
 
-// Deep link to open bot with a specific like payload
-const buildDeepLink = (botUsername, likeId) => `https://t.me/${botUsername}?start=${likeId}`;
+// Deep link to open bot with a specific like payload (id or token)
+const buildDeepLink = (botUsername, payload) => `https://t.me/${botUsername}?start=${payload}`;
 
 /*
  createLikeKeyboard (for bot chats):
@@ -76,7 +78,8 @@ const createLikeKeyboard = (like, botUsername, creatorChannel = '') => {
 
   // Row 3: Share button only if botUsername provided and not placeholder
   if (botUsername && botUsername !== 'your_bot') {
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, like.id))}&text=${encodeURIComponent(`بیاین باهم لایک کنیم: ${like.name}`)}`;
+    const payload = like.token || like.id;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, payload))}&text=${encodeURIComponent(`بیاین باهم لایک کنیم: ${like.name}`)}`;
     const shareBtn = { text: '🔗 ارسال برای دوستان', url: shareUrl };
     buttons.push([shareBtn]);
   }
@@ -148,21 +151,30 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
   // Deep link payload: /start <likeId>
   if (text.startsWith('/start ')) {
     const payload = text.split(' ')[1]?.trim() || '';
-    if (payload && payload.startsWith('like_')) {
-      const likeData = await kv.get(`like:${payload}`);
-      if (likeData) {
-        const like = JSON.parse(likeData);
-        const creatorChannel = (await kv.get(`channel:${like.creator}`)) || '';
-        const keyboard = (message.from?.id === like.creator)
-          ? createCreatorLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
-          : createLikeKeyboard(like, botUsername || 'your_bot', creatorChannel);
-        await sendMessage(
-          token,
-          chatId,
-          `👍 ${like.name}\n\n❤️ تعداد لایک: ${like.likes || 0}`,
-          keyboard
-        );
-        return;
+    if (payload) {
+      let likeId = '';
+      if (payload.startsWith('like_')) {
+        likeId = payload;
+      } else {
+        const mapped = await kv.get(`token:${payload}`);
+        if (mapped) likeId = mapped;
+      }
+      if (likeId) {
+        const likeData = await kv.get(`like:${likeId}`);
+        if (likeData) {
+          const like = JSON.parse(likeData);
+          const creatorChannel = (await kv.get(`channel:${like.creator}`)) || '';
+          const keyboard = (message.from?.id === like.creator)
+            ? createCreatorLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
+            : createLikeKeyboard(like, botUsername || 'your_bot', creatorChannel);
+          await sendMessage(
+            token,
+            chatId,
+            `👍 ${like.name}\n\n❤️ تعداد لایک: ${like.likes || 0}`,
+            keyboard
+          );
+          return;
+        }
       }
     }
   }
@@ -172,7 +184,8 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
     await sendMessage(
       token,
       chatId,
-      '🎉 خوش اومدی!\nبا این بات برای هر چیزی لایک جمع کن و رشدش رو ببین.👇',
+      '🎉 خوش اومدی!\nبا این بات برای هر چیزی لایک جمع کن و رشدش رو ببین.👇\n\n' +
+        `ℹ️ نسخه بات: ${BOT_VERSION}`,
       mainMenuKeyboard()
     );
 
@@ -195,16 +208,19 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
   // User typed like name
   if (userState === 'waiting_like_name') {
     const likeId = `like_${userId}_${Date.now()}`;
+    const shareToken = Math.random().toString(36).slice(2, 10);
 
     const likeObj = {
       id: likeId,
       name: text,
       creator: userId,
       likes: 0,
+      token: shareToken,
       created_at: Date.now()
     };
 
     await kv.put(`like:${likeId}`, JSON.stringify(likeObj));
+    await kv.put(`token:${shareToken}`, likeId);
     await kv.delete(`state:${userId}`);
 
     const creatorChannel = (await kv.get(`channel:${userId}`)) || '';
@@ -317,7 +333,8 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       token,
       chatId,
       messageId,
-      '🎉 خوش اومدی! با این بات برای هر چیزی لایک جمع کن.👇',
+      '🎉 خوش اومدی! با این بات برای هر چیزی لایک جمع کن.👇\n\n' +
+        `ℹ️ نسخه بات: ${BOT_VERSION}`,
       mainMenuKeyboard()
     );
     return;
