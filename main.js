@@ -212,8 +212,7 @@ async function sendHome(chatId, userId, env) {
   const me = await resolveBotUsername(env);
   const text = `سلام! به ربات لایکی خوش اومدی ✨\n\n` +
     (forceChannel ? `عضویت اجباری: ${forceChannel}\n` : '') +
-    `برای شروع از دکمه‌های زیر استفاده کن.\n` +
-    (me ? `لینک دعوت ربات: https://t.me/${me.replace('@', '')}` : '');
+    `برای شروع از دکمه‌های زیر استفاده کن.`;
 
   // منوی اصلی + اگر ادمین باشد دکمه تنظیم کانال را اضافه کن
   const base = mainMenu(forceChannel).inline_keyboard;
@@ -374,7 +373,7 @@ async function handleCallback(update, env) {
     }
     await tgApi(env).answerCallbackQuery({ callback_query_id: cb.id });
     await setUserState(env, userId, 'await_like_title');
-    return tgApi(env).sendMessage({ chat_id: chatId, text: 'عنوان لایک‌ات چیه؟ فقط یک جمله کوتاه بفرست.' });
+    return tgApi(env).sendMessage({ chat_id: chatId, text: '🏷 لطفا متنی که میخواهید در زیر آن دکمه لایک قرار گیرد را ارسال کنید.' });
   }
 
   // ثبت/تغییر کانال کاربر برای ارسال مستقیم
