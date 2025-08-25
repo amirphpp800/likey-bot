@@ -3,7 +3,7 @@
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
 // Bot version (bump this on each update)
-const BOT_VERSION = '1.4';
+const BOT_VERSION = '1.5';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
@@ -99,7 +99,8 @@ const createLikeKeyboard = (like, botUsername, creatorChannel = '') => {
   // Row 3: Share button only if botUsername provided and not placeholder
   if (botUsername && botUsername !== 'your_bot') {
     const payload = like.token || like.id;
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(buildDeepLink(botUsername, payload))}&text=${encodeURIComponent(`🔥 ${like.name} رو لایک کن!\n\n👆 روی لینک بزن و حمایتت رو نشون بده`)}`;
+    const shareText = `🔥 ${like.name} رو لایک کن!\n\n👆 جهت ارسال لایک اینجا را کلیک کنید:\n@${botUsername} ${payload}`;
+    const shareUrl = `https://t.me/share/url?text=${encodeURIComponent(shareText)}`;
     const shareBtn = { text: '💫 اشتراک‌گذاری', url: shareUrl };
     buttons.push([shareBtn]);
   }
@@ -283,6 +284,40 @@ const handleMessage = async (message, token, kv, botUsername = '') => {
       settingsKeyboard()
     );
     return;
+  }
+
+  // Handle @botusername messages (alternative to /start)
+  if (text.startsWith('@') && text.includes(' ')) {
+    const parts = text.split(' ');
+    if (parts.length >= 2) {
+      const payload = parts[1].trim();
+      if (payload) {
+        let likeId = '';
+        if (payload.startsWith('like_')) {
+          likeId = payload;
+        } else {
+          const mapped = await kv.get(`token:${payload}`);
+          if (mapped) likeId = mapped;
+        }
+        if (likeId) {
+          const likeData = await kv.get(`like:${likeId}`);
+          if (likeData) {
+            const like = JSON.parse(likeData);
+            const creatorChannel = (await kv.get(`channel:${like.creator}`)) || '';
+            const keyboard = (message.from?.id === like.creator)
+              ? createCreatorLikeKeyboard(like, botUsername || 'your_bot', creatorChannel)
+              : createLikeKeyboard(like, botUsername || 'your_bot', creatorChannel);
+            await sendMessage(
+              token,
+              chatId,
+              `👍 ${like.name}\n\n❤️ تعداد لایک: ${like.likes || 0}`,
+              keyboard
+            );
+            return;
+          }
+        }
+      }
+    }
   }
 
   // Fallback
