@@ -3,7 +3,7 @@
 // Bot configuration
 const REQUIRED_CHANNEL = '@NoiDUsers';
 // Bot version (bump this on each update)
-const BOT_VERSION = '1.5';
+const BOT_VERSION = '1.6';
 
 // -------------------- Telegram Utilities --------------------
 const telegramAPI = (token, method, params = {}) => {
@@ -62,7 +62,7 @@ const checkChannelMembership = async (token, userId, channelUsername) => {
 // -------------------- Keyboards --------------------
 const mainMenuKeyboard = () => ({
   inline_keyboard: [
-    [{ text: '🚀 ساخت پست جدید', callback_data: 'create_like' }],
+    [{ text: '🚀 ساخت لایک', callback_data: 'create_like' }],
     [{ text: '📊 پست‌های من', callback_data: 'my_posts' }],
     [{ text: '⚙️ تنظیمات', callback_data: 'settings' }]
   ]
@@ -396,10 +396,10 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
         token,
         chatId,
         messageId,
-        '📭 هنوز هیچ پستی نساختی!\n\n🚀 برای شروع، روی "ساخت پست جدید" بزن و اولین پستت رو بساز.',
+        '📭 هنوز هیچ پستی نساختی!\n\n🚀 برای شروع، روی "ساخت لایک" بزن و اولین پستت رو بساز.',
         {
           inline_keyboard: [
-            [{ text: '🚀 ساخت پست جدید', callback_data: 'create_like' }],
+            [{ text: '🚀 ساخت لایک', callback_data: 'create_like' }],
             [{ text: '🏠 بازگشت به خانه', callback_data: 'back_main' }]
           ]
         }
@@ -439,7 +439,8 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       buttons.push([{ text: `📝 ${shortName} (${like.likes || 0})`, callback_data: `view_post:${like.id}` }]);
     });
     
-    buttons.push([{ text: '🚀 ساخت پست جدید', callback_data: 'create_like' }]);
+    buttons.push([{ text: '🚀 ساخت لایک', callback_data: 'create_like' }]);
+    buttons.push([{ text: '🗑️ حذف همه پست‌ها', callback_data: 'delete_all_confirm' }]);
     buttons.push([{ text: '🏠 بازگشت به خانه', callback_data: 'back_main' }]);
 
     await editMessage(token, chatId, messageId, postsText, { inline_keyboard: buttons });
@@ -487,6 +488,57 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
       messageId,
       '🏠 به خانه برگشتی!\n\n🚀 از منوی زیر هر کاری که می‌خوای انجام بده:\n\n' +
         `📱 نسخه بات: ${BOT_VERSION}`,
+      mainMenuKeyboard()
+    );
+    return;
+  }
+
+  // Delete all posts - confirmation
+  if (data === 'delete_all_confirm') {
+    await editMessage(
+      token,
+      chatId,
+      messageId,
+      '⚠️ مطمئنی می‌خوای همه پست‌هات رو حذف کنی؟\n\nاین کار قابل بازگشت نیست.',
+      {
+        inline_keyboard: [
+          [{ text: '✅ بله، حذف کن', callback_data: 'delete_all_posts' }],
+          [{ text: '❌ انصراف', callback_data: 'my_posts' }]
+        ]
+      }
+    );
+    return;
+  }
+
+  // Delete all posts - action
+  if (data === 'delete_all_posts') {
+    const userLikes = await kv.list({ prefix: `like:like_${userId}_` });
+    let deletedCount = 0;
+    for (const key of userLikes.keys) {
+      const likeData = await kv.get(key.name);
+      if (!likeData) continue;
+      const like = JSON.parse(likeData);
+      // delete mapping token -> likeId
+      if (like.token) {
+        await kv.delete(`token:${like.token}`);
+      }
+      // delete liked:likeId:* entries
+      const likedKeys = await kv.list({ prefix: `liked:${like.id}:` });
+      for (const lk of likedKeys.keys) {
+        await kv.delete(lk.name);
+      }
+      // delete like itself
+      await kv.delete(key.name);
+      deletedCount++;
+    }
+
+    await editMessage(
+      token,
+      chatId,
+      messageId,
+      deletedCount > 0
+        ? `✅ ${deletedCount} پست با موفقیت حذف شد.`
+        : 'ℹ️ پستی برای حذف یافت نشد.',
       mainMenuKeyboard()
     );
     return;
