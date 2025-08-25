@@ -132,8 +132,8 @@ function mainMenu(forceChannel) {
   const rows = [
     [{ text: '➕ ساخت لایک', callback_data: 'act:create_like' }],
     [
-      { text: '📣 مدیریت کانال', callback_data: 'act:my_channel' },
       { text: '📊 آمار', callback_data: 'act:stats' },
+      { text: '📣 مدیریت کانال', callback_data: 'act:my_channel' },
     ],
   ];
   // دکمه تنظیم کانال فقط برای ادمین در زمان نمایش، کنترل می‌شود
