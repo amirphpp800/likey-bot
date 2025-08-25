@@ -1,7 +1,7 @@
 // Cloudflare Pages Function to handle Telegram webhook
 // Exposes onRequestPost and delegates to handleUpdate from ../main.js (ESM)
 
-import { handleUpdate } from '../main.js';
+import { handleUpdate } from './main.js';
 
 export async function onRequestPost({ request, env, waitUntil }) {
   try {
@@ -14,5 +14,6 @@ export async function onRequestPost({ request, env, waitUntil }) {
     return new Response('bad request', { status: 400 });
   }
 }
+
 
 
