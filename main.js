@@ -42,8 +42,7 @@ const checkChannelMembership = async (token, userId, channelUsername) => {
 const mainMenuKeyboard = () => ({
   inline_keyboard: [
     [{ text: '✨ ساخت لایک جدید', callback_data: 'create_like' }],
-    [{ text: '⚙️ تنظیمات', callback_data: 'settings' }],
-    [{ text: '📊 آمار من', callback_data: 'stats' }]
+    [{ text: '⚙️ تنظیمات', callback_data: 'settings' }]
   ]
 });
 
@@ -292,30 +291,7 @@ const handleCallbackQuery = async (query, token, kv, botUsername = '') => {
     return;
   }
 
-  if (data === 'stats') {
-    const likeKeys = await kv.list({ prefix: 'like:' });
-    let userLikes = 0;
-    let totalLikes = 0;
-
-    for (const key of likeKeys.keys) {
-      const likeData = await kv.get(key.name);
-      if (!likeData) continue;
-      const like = JSON.parse(likeData);
-      if (like.creator === userId) userLikes++;
-      totalLikes += like.likes || 0;
-    }
-
-    await editMessage(
-      token,
-      chatId,
-      messageId,
-      `📊 آمار شما:\n\n` +
-        `🧩 تعداد لایک‌هات: ${userLikes}\n` +
-        `💜 مجموع لایک‌های دریافت‌شده: ${totalLikes}`,
-      { inline_keyboard: [[{ text: '⬅️ برگشت به منو', callback_data: 'back_main' }]] }
-    );
-    return;
-  }
+  
 
   if (data === 'back_main') {
     await editMessage(
